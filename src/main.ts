@@ -256,7 +256,7 @@ function renderApp(): void {
             </div>
           </div>
         </div>
-        <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle dark and light theme">☀️</button>
+        <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle dark and light theme" aria-pressed="false">☀️</button>
       </header>
 
       <section class="section-card split-pane" id="exhibit-vrf">
@@ -518,7 +518,7 @@ The delay turns strategic choice into blind choice.</pre>
               <h3>Epoch 42 Randomness Beacon</h3>
               <span class="tiny-note">aria-live log for the current round</span>
             </div>
-            <div id="beacon-log" class="beacon-log" aria-live="polite"></div>
+            <div id="beacon-log" class="beacon-log" role="log" aria-live="polite"></div>
           </article>
         </div>
       </section>
@@ -581,7 +581,9 @@ The delay turns strategic choice into blind choice.</pre>
 
 function syncThemeToggle(): void {
   const currentTheme = document.documentElement.getAttribute('data-theme') ?? 'dark';
-  requireElement<HTMLButtonElement>('#theme-toggle').textContent = currentTheme === 'dark' ? '☀️' : '🌙';
+  const button = requireElement<HTMLButtonElement>('#theme-toggle');
+  button.textContent = currentTheme === 'dark' ? '☀️' : '🌙';
+  button.setAttribute('aria-pressed', currentTheme === 'light' ? 'true' : 'false');
 }
 
 function updateVdfProgress(progress: number, squarings: number, elapsedMs: number, etaMs: number): void {
