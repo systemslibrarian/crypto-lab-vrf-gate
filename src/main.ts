@@ -256,7 +256,7 @@ function renderApp(): void {
             </div>
           </div>
         </div>
-        <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle dark and light theme" aria-pressed="false">☀️</button>
+        <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Switch to light mode" aria-pressed="false">🌙</button>
       </header>
 
       <section class="section-card split-pane" id="exhibit-vrf">
@@ -579,11 +579,25 @@ The delay turns strategic choice into blind choice.</pre>
   `;
 }
 
-function syncThemeToggle(): void {
-  const currentTheme = document.documentElement.getAttribute('data-theme') ?? 'dark';
+function initThemeToggle(): void {
+  const root = document.documentElement;
   const button = requireElement<HTMLButtonElement>('#theme-toggle');
-  button.textContent = currentTheme === 'dark' ? '☀️' : '🌙';
-  button.setAttribute('aria-pressed', currentTheme === 'light' ? 'true' : 'false');
+
+  const applyThemeState = (theme: 'dark' | 'light'): void => {
+    root.setAttribute('data-theme', theme);
+    localStorage.setItem('theme', theme);
+    button.textContent = theme === 'dark' ? '🌙' : '☀️';
+    button.setAttribute('aria-label', theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode');
+    button.setAttribute('aria-pressed', theme === 'light' ? 'true' : 'false');
+  };
+
+  const currentTheme = root.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+  applyThemeState(currentTheme);
+
+  button.addEventListener('click', () => {
+    const nextTheme = root.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+    applyThemeState(nextTheme);
+  });
 }
 
 function updateVdfProgress(progress: number, squarings: number, elapsedMs: number, etaMs: number): void {
@@ -881,17 +895,6 @@ async function runBeaconDemo(): Promise<void> {
   }
 }
 
-function bindThemeToggle(): void {
-  const button = requireElement<HTMLButtonElement>('#theme-toggle');
-  syncThemeToggle();
-  button.addEventListener('click', () => {
-    const nextTheme = (document.documentElement.getAttribute('data-theme') ?? 'dark') === 'dark' ? 'light' : 'dark';
-    document.documentElement.setAttribute('data-theme', nextTheme);
-    localStorage.setItem('cv-theme', nextTheme);
-    syncThemeToggle();
-  });
-}
-
 function bindControls(): void {
   requireElement<HTMLButtonElement>('#vrf-compute').addEventListener('click', async () => {
     await populateVrfForAlpha(requireElement<HTMLInputElement>('#vrf-alpha').value);
@@ -942,7 +945,7 @@ function bindControls(): void {
 
 async function boot(): Promise<void> {
   renderApp();
-  bindThemeToggle();
+  initThemeToggle();
   bindControls();
   appState.vrf.keyPair = await vrfKeyGen();
   await populateVrfForAlpha(requireElement<HTMLInputElement>('#vrf-alpha').value);

@@ -340,16 +340,22 @@ footer p {
 
 .theme-toggle {
   position: absolute;
-  top: 1rem;
-  right: 1rem;
-  width: 52px;
-  height: 52px;
+  top: 0;
+  right: 0;
+  width: 2.6rem;
+  height: 2.6rem;
   padding: 0;
   display: grid;
   place-items: center;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.1);
-  z-index: 2;
+  border-color: var(--line);
+  background: var(--panel);
+  color: var(--text);
+  z-index: 10;
+}
+
+.theme-toggle:hover {
+  background: var(--panel-strong);
 }
 
 .section-card,
