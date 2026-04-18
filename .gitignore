@@ -1,4 +1,5 @@
 node_modules/
 dist/
+.tmp-checks/
 .vscode/
 .DS_Store

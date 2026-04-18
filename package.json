@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "check:phase1": "tsc -p tsconfig.scripts.json && node --experimental-specifier-resolution=node .tmp-checks/scripts/check-phase1.js"
+    "check:phase1": "tsc -p tsconfig.scripts.json && node --experimental-specifier-resolution=node .tmp-checks/scripts/check-phase1.js",
+    "check:phase2": "tsc -p tsconfig.scripts.json && node --experimental-specifier-resolution=node .tmp-checks/scripts/check-phase2.js"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",
