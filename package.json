@@ -6,9 +6,11 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "check:phase1": "tsc -p tsconfig.scripts.json && node --experimental-specifier-resolution=node .tmp-checks/scripts/check-phase1.js"
   },
   "devDependencies": {
+    "@types/node": "^22.14.0",
     "typescript": "^5.7.3",
     "vite": "^6.2.0"
   }
