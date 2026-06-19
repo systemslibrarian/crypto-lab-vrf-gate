@@ -4,6 +4,8 @@
 
 This demo combines ECVRF-P256-SHA256 and a Wesolowski VDF over an RSA-style group to show how public randomness can be both verifiable and delayed. The VRF side solves the problem of proving that a deterministic pseudorandom output came from one specific public key and input without exposing the secret key. The VDF side solves the problem of forcing a sequential delay before the final randomness can be known while keeping verification much cheaper than evaluation. The security model is asymmetric and publicly verifiable, uses WebCrypto plus exact BigInt arithmetic, and is not post-quantum secure.
 
+The VRF is **byte-exact RFC 9381** (ciphersuite ECVRF-P256-SHA256-TAI): try-and-increment hash-to-curve, an RFC 6979 deterministic nonce, the `s = k + c·x` response, and SEC1 compressed points. A known-answer test (`npm run check:rfc9381`) reproduces the standard's official Appendix B.1 test vector — H, k, U, V, π, and β all match — and runs in CI before every deploy, so the outputs here would be accepted by any conforming verifier. The VDF is an intentionally small "toy" Wesolowski construction for in-browser speed; production VDFs use 2048-bit RSA moduli or class groups of unknown order. Each exhibit has a layered **"See the math"** panel that exposes these intermediate values live.
+
 ## When to Use It
 
 - Use it to teach validator selection or randomness beacons in proof-of-stake systems. The demo shows why a VRF gives unique verifiable contributions while a VDF delays strategic prediction.
@@ -28,6 +30,15 @@ npm run dev
 ```
 
 There are no environment variables.
+
+## Verification
+
+```bash
+npm run check   # phase logic checks + RFC 9381 known-answer test
+npm run e2e     # headless Chromium: drives the real UI + axe accessibility scan
+```
+
+`npm run check` proves the VRF reproduces the RFC 9381 Appendix B.1 vector. `npm run e2e` builds the app, boots it in headless Chromium, exercises VRF compute/verify/tamper and VDF evaluate/verify, asserts no console errors and no horizontal overflow at a 360px viewport, and runs an [axe-core](https://github.com/dequelabs/axe-core) accessibility scan (WCAG 2.0/2.1 A + AA) in both dark and light themes — currently zero violations. Both run in CI before every deploy.
 
 ## Part of the Crypto-Lab Suite
 

@@ -10,11 +10,16 @@
     "preview": "vite preview",
     "check:phase1": "tsc -p tsconfig.scripts.json && node --experimental-specifier-resolution=node .tmp-checks/scripts/check-phase1.js",
     "check:phase2": "tsc -p tsconfig.scripts.json && node --experimental-specifier-resolution=node .tmp-checks/scripts/check-phase2.js",
-    "check:phase3": "tsc -p tsconfig.scripts.json && node --experimental-specifier-resolution=node .tmp-checks/scripts/check-phase3.js"
+    "check:phase3": "tsc -p tsconfig.scripts.json && node --experimental-specifier-resolution=node .tmp-checks/scripts/check-phase3.js",
+    "check:rfc9381": "tsc -p tsconfig.scripts.json && node --experimental-specifier-resolution=node .tmp-checks/scripts/check-rfc9381.js",
+    "check": "npm run check:phase1 && npm run check:phase2 && npm run check:phase3 && npm run check:rfc9381",
+    "e2e": "npm run build && node scripts/e2e.mjs"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.11.3",
     "@types/node": "^22.14.0",
     "gh-pages": "^6.3.0",
+    "playwright": "^1.61.0",
     "typescript": "^5.7.3",
     "vite": "^6.2.0"
   }

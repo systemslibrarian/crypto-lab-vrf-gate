@@ -2,16 +2,23 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta
+      name="description"
+      content="An interactive browser lab for Verifiable Random Functions (VRFs) and Verifiable Delay Functions (VDFs): provable, public-key randomness in time, with a live blockchain randomness beacon simulation."
+    />
+    <meta name="theme-color" content="#07111e" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#f4ede2" media="(prefers-color-scheme: light)" />
     <script>
       (function () {
         const saved = localStorage.getItem('theme');
         document.documentElement.setAttribute('data-theme', saved ?? 'dark');
       })();
     </script>
-    <title>crypto-lab-vrf-gate</title>
+    <title>VRF + VDF Crypto Lab — Provable Randomness in Time</title>
   </head>
   <body>
+    <a class="skip-link" href="#main-content">Skip to main content</a>
     <div id="app"></div>
     <footer class="scripture-footer">
       <p>So whether you eat or drink or whatever you do, do it all for the glory of God. — 1 Corinthians 10:31</p>

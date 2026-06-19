@@ -161,6 +161,61 @@ export function bytesToPoint(bytes: Uint8Array): AffinePoint {
   return point;
 }
 
+/**
+ * SEC1 compressed point encoding (33 bytes): 0x02/0x03 prefix (parity of y) || x.
+ * RFC 9381 uses this `point_to_string` for every curve point it hashes or serializes.
+ */
+export function compressPoint(point: AffinePoint): Uint8Array {
+  const result = new Uint8Array(33);
+  result[0] = (point.y & 1n) === 0n ? 0x02 : 0x03;
+  result.set(bigintToBytes(point.x, 32), 1);
+  return result;
+}
+
+/**
+ * Recover the affine point from a SEC1 compressed encoding (the `string_to_point` of
+ * RFC 9381). Throws if the bytes are not a valid on-curve compressed point.
+ */
+export function decompressPoint(bytes: Uint8Array): AffinePoint {
+  if (bytes.length !== 33 || (bytes[0] !== 0x02 && bytes[0] !== 0x03)) {
+    throw new Error('Expected a 33-byte SEC1 compressed P-256 point');
+  }
+
+  const point = decompressXWithParity(bytesToBigInt(bytes.slice(1)), bytes[0] === 0x03);
+
+  if (point === null) {
+    throw new Error('Compressed point does not lie on the P-256 curve');
+  }
+
+  return point;
+}
+
+/**
+ * Try to interpret a 32-byte string as the x-coordinate of a point with even y.
+ * Returns null (rather than throwing) when x >= p or no square root exists — this is
+ * exactly the "INVALID, try the next counter" branch of RFC 9381 try-and-increment.
+ */
+export function tryDecompressEvenX(xBytes: Uint8Array): AffinePoint | null {
+  return decompressXWithParity(bytesToBigInt(xBytes), false);
+}
+
+function decompressXWithParity(x: bigint, wantOdd: boolean): AffinePoint | null {
+  if (x >= P256_P) {
+    return null;
+  }
+
+  const rhs = mod(x * x * x + P256_A * x + P256_B, P256_P);
+  const root = sqrtModP(rhs);
+
+  if (root === null) {
+    return null;
+  }
+
+  const y = ((root & 1n) === 1n) === wantOdd ? root : mod(-root, P256_P);
+  const point = { x, y };
+  return isOnCurve(point) ? point : null;
+}
+
 export function scalarToBytes(scalar: bigint): Uint8Array {
   return bigintToBytes(mod(scalar, P256_N), 32);
 }

@@ -27,6 +27,12 @@ jobs:
           cache: npm
       - name: Install dependencies
         run: npm ci
+      - name: Verify (phase checks + RFC 9381 known-answer test)
+        run: npm run check
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+      - name: End-to-end + accessibility (axe) test
+        run: npm run e2e
       - name: Build
         run: npm run build
       - name: Upload pages artifact

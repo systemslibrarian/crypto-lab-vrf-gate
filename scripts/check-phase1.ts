@@ -1,6 +1,6 @@
-import { hashToCurve, vrfKeyGen, vrfProve, vrfVerify } from '../src/ecvrf.js';
+import { encodeToCurveTAI, vrfKeyGen, vrfProve, vrfVerify } from '../src/ecvrf.js';
 import { equalBytes, utf8ToBytes } from '../src/utils/bytes.js';
-import { bytesToPoint, isOnCurve } from '../src/utils/p256.js';
+import { isOnCurve } from '../src/utils/p256.js';
 
 function assert(condition: boolean, message: string): void {
   if (!condition) {
@@ -39,8 +39,8 @@ async function main(): Promise<void> {
   const wrongKeyResult = await vrfVerify(alternateKeyPair.publicKeyBytes, alpha, runOne);
   assert(!wrongKeyResult.valid, 'Expected a different public key to fail verification');
 
-  const hashPoint = await hashToCurve(keyPair.publicKeyBytes, alpha);
-  assert(isOnCurve(bytesToPoint(hashPoint)), 'hashToCurve did not return an on-curve point');
+  const { point: hashPoint } = await encodeToCurveTAI(keyPair.publicKeyBytes, alpha);
+  assert(isOnCurve(hashPoint), 'encode_to_curve did not return an on-curve point');
 
   console.log('phase-1 checks passed');
 }

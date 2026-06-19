@@ -25,6 +25,7 @@ import {
   utf8ToBytes,
   xorBytes,
 } from './utils/bytes.js';
+import { powerOfTwoMod } from './utils/vdfMath.js';
 import {
   TOY_PARAMS,
   estimateVDFTime,
@@ -224,7 +225,7 @@ function currentVdfParams(explicitExp?: number): VDFParams {
 
 function renderApp(): void {
   app.innerHTML = `
-    <main class="page-shell">
+    <main class="page-shell" id="main-content" tabindex="-1" aria-label="VRF and VDF crypto lab">
       <header class="hero-panel">
         <div class="hero-copy">
           <p class="kicker">crypto-lab-vrf-gate</p>
@@ -236,7 +237,7 @@ function renderApp(): void {
           <div class="hero-ribbon">
             <span class="badge beta">VRF: sealed output</span>
             <span class="badge proof">VDF: elapsed time proof</span>
-            <span class="badge valid">No fake math</span>
+            <span class="badge valid">RFC 9381-verified</span>
           </div>
         </div>
         <div class="hero-ornament" aria-hidden="true">
@@ -258,6 +259,52 @@ function renderApp(): void {
         </div>
         <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Switch to light mode" aria-pressed="false">🌙</button>
       </header>
+
+      <section class="section-card primer" id="primer">
+        <div class="section-heading compact">
+          <p class="section-index">Start here</p>
+          <h2>New to verifiable randomness?</h2>
+          <p>
+            Two tools, one job: produce randomness nobody can rig and everybody can check. Read the
+            plain-language idea first — then expand any <strong>“See the math”</strong> panel for the
+            real construction, with live values from your own run.
+          </p>
+        </div>
+        <div class="primer-grid">
+          <article class="primer-card">
+            <h3>VRF — a keyed, checkable hash</h3>
+            <p>
+              A secret key turns an input α into an output β that looks random, plus a proof π. Anyone
+              holding the public key can confirm β is the one true output for (key, α), yet nobody can
+              predict β without the key.
+            </p>
+          </article>
+          <article class="primer-card">
+            <h3>VDF — a clock you can’t fast-forward</h3>
+            <p>
+              Producing the output takes a fixed number of <em>sequential</em> steps; no amount of
+              parallel hardware speeds it up. Checking the answer afterward is near-instant. It proves
+              real time elapsed.
+            </p>
+          </article>
+          <article class="primer-card">
+            <h3>Why both?</h3>
+            <p>
+              A VRF stops you forging randomness. A VDF stops you <em>previewing</em> it in time to
+              cheat. Chained together they make a public beacon that resists grinding and
+              last-reveal bias.
+            </p>
+          </article>
+        </div>
+        <dl class="glossary" aria-label="Symbol glossary">
+          <div><dt>α alpha</dt><dd>the public input being randomized</dd></div>
+          <div><dt>β beta</dt><dd>the VRF output — deterministic, uniform-looking</dd></div>
+          <div><dt>π pi</dt><dd>the proof that β is correct for (pk, α)</dd></div>
+          <div><dt>H</dt><dd>α hashed onto a curve point</dd></div>
+          <div><dt>Γ gamma</dt><dd>secret key × H; β is its hash</dd></div>
+          <div><dt>RANDAO</dt><dd>XOR of many validators’ VRF outputs</dd></div>
+        </dl>
+      </section>
 
       <section class="section-card split-pane" id="exhibit-vrf">
         <div class="section-heading">
@@ -285,7 +332,7 @@ function renderApp(): void {
               </div>
               <div>
                 <span class="strip-label">Public key</span>
-                <code id="vrf-public-key" class="proof-bytes" role="code" aria-label="VRF public key bytes">loading...</code>
+                <code id="vrf-public-key" class="proof-bytes" aria-label="VRF public key bytes">loading...</code>
               </div>
             </div>
             <div class="button-row">
@@ -295,13 +342,52 @@ function renderApp(): void {
             <div class="result-panel">
               <div>
                 <span class="strip-label">Output β</span>
-                <code id="vrf-beta" class="proof-bytes beta-text" role="code" aria-label="VRF output beta">—</code>
+                <code id="vrf-beta" class="proof-bytes beta-text" aria-label="VRF output beta">—</code>
               </div>
               <div>
                 <span class="strip-label">Proof π</span>
-                <pre id="vrf-proof" class="proof-box proof-text" role="code" aria-label="VRF proof bytes">—</pre>
+                <pre id="vrf-proof" class="proof-box proof-text" aria-label="VRF proof bytes">—</pre>
               </div>
             </div>
+            <details class="math-reveal">
+              <summary>See the math — how this proof is built</summary>
+              <p class="math-intro">
+                ECVRF-P256-SHA256-TAI, exactly as RFC 9381 specifies. Every value below is from the
+                input α above; change α and recompute to watch them move.
+              </p>
+              <ol class="math-steps">
+                <li>
+                  <span class="math-step-label">H = encode_to_curve(pk, α)</span>
+                  <code id="vrf-math-h" class="proof-bytes" aria-label="Curve point H">—</code>
+                  <span class="math-aside" id="vrf-math-h-ctr"></span>
+                </li>
+                <li>
+                  <span class="math-step-label">Γ = x · H <span class="math-aside">(needs the secret key)</span></span>
+                  <code id="vrf-math-gamma" class="proof-bytes" aria-label="Gamma point">—</code>
+                </li>
+                <li>
+                  <span class="math-step-label">U = k · B and V = k · H <span class="math-aside">(k = deterministic RFC 6979 nonce)</span></span>
+                  <code id="vrf-math-u" class="proof-bytes" aria-label="U point">—</code>
+                  <code id="vrf-math-v" class="proof-bytes" aria-label="V point">—</code>
+                </li>
+                <li>
+                  <span class="math-step-label">c = SHA-256(0x01‖0x02‖pk‖H‖Γ‖U‖V‖0x00) [first 16 bytes]</span>
+                  <code id="vrf-math-c" class="proof-bytes" aria-label="Challenge c">—</code>
+                </li>
+                <li>
+                  <span class="math-step-label">s = (k + c · x) mod n</span>
+                  <code id="vrf-math-s" class="proof-bytes" aria-label="Response s">—</code>
+                </li>
+                <li>
+                  <span class="math-step-label">β = SHA-256(0x01‖0x03‖Γ‖0x00)</span>
+                  <code id="vrf-math-beta" class="proof-bytes beta-text" aria-label="Output beta">—</code>
+                </li>
+              </ol>
+              <p class="tiny-note">
+                To verify, anyone recomputes U = s·B − c·Y and V = s·H − c·Γ and checks the challenge
+                matches — using only the public key. The proof leaks nothing about x.
+              </p>
+            </details>
             <div class="property-grid">
               <article class="property-card">
                 <h3>Uniqueness</h3>
@@ -335,7 +421,7 @@ function renderApp(): void {
               <button id="vrf-verify" type="button">Verify</button>
               <button id="vrf-tamper" class="ghost-button" type="button">Tamper with β</button>
             </div>
-            <p id="vrf-verify-status" class="status-pill" data-tone="neutral">Verification status is waiting for a proof.</p>
+            <p id="vrf-verify-status" class="status-pill" data-tone="neutral" role="status" aria-live="polite">Verification status is waiting for a proof.</p>
           </article>
         </div>
       </section>
@@ -358,17 +444,17 @@ function renderApp(): void {
             </div>
             <div class="slider-row">
               <label for="vdf-exp">Delay T</label>
-              <input id="vdf-exp" type="range" min="12" max="18" value="16" />
+              <input id="vdf-exp" type="range" min="12" max="18" value="16" aria-describedby="vdf-exp-label" />
               <span id="vdf-exp-label">2^16 = 65,536 squarings</span>
             </div>
             <div class="metric-grid">
               <div class="metric-card">
                 <span class="strip-label">Toy modulus N</span>
-                <code id="vdf-modulus" class="proof-bytes" role="code" aria-label="Toy VDF modulus">—</code>
+                <code id="vdf-modulus" class="proof-bytes" aria-label="Toy VDF modulus">—</code>
               </div>
               <div class="metric-card">
                 <span class="strip-label">g = H(x) mod N</span>
-                <code id="vdf-group" class="proof-bytes" role="code" aria-label="VDF group element">—</code>
+                <code id="vdf-group" class="proof-bytes" aria-label="VDF group element">—</code>
               </div>
             </div>
             <div class="button-row">
@@ -380,7 +466,7 @@ function renderApp(): void {
                 <span>Progress</span>
                 <strong id="vdf-progress-text">0%</strong>
               </div>
-              <div id="vdf-progress" class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+              <div id="vdf-progress" class="progress-track" role="progressbar" aria-label="VDF evaluation progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
                 <span class="progress-fill amber-fill"></span>
               </div>
               <div class="metric-grid timing-grid">
@@ -404,18 +490,18 @@ function renderApp(): void {
             <div class="metric-grid">
               <div class="metric-card">
                 <span class="strip-label">Result y</span>
-                <code id="vdf-output" class="proof-bytes beta-text" role="code" aria-label="VDF output">—</code>
+                <code id="vdf-output" class="proof-bytes beta-text" aria-label="VDF output">—</code>
               </div>
               <div class="metric-card">
                 <span class="strip-label">Prime ℓ</span>
-                <code id="vdf-prime" class="proof-bytes proof-text" role="code" aria-label="VDF Wesolowski prime">—</code>
+                <code id="vdf-prime" class="proof-bytes proof-text" aria-label="VDF Wesolowski prime">—</code>
               </div>
               <div class="metric-card wide">
                 <span class="strip-label">Proof π</span>
-                <code id="vdf-proof" class="proof-bytes proof-text" role="code" aria-label="VDF proof value">—</code>
+                <code id="vdf-proof" class="proof-bytes proof-text" aria-label="VDF proof value">—</code>
               </div>
             </div>
-            <p id="vdf-verify-status" class="status-pill" data-tone="neutral">Evaluate the VDF to produce a proof bundle.</p>
+            <p id="vdf-verify-status" class="status-pill" data-tone="neutral" role="status" aria-live="polite">Evaluate the VDF to produce a proof bundle.</p>
             <div class="timing-callouts">
               <div class="callout-card">
                 <h3>Measured in this browser</h3>
@@ -426,6 +512,29 @@ function renderApp(): void {
                 <p id="vdf-estimate"></p>
               </div>
             </div>
+            <details class="math-reveal">
+              <summary>See the math — why verifying is fast</summary>
+              <p>
+                Evaluation runs <strong id="vdf-math-t">2^16</strong> modular squarings
+                <em>in sequence</em>: y = g^(2^T) mod N. Each squaring needs the one before it, so
+                extra cores can’t help — that sequential chain <em>is</em> the delay.
+              </p>
+              <p>
+                Wesolowski makes checking cheap. Hash to a prime ℓ, write 2^T = q·ℓ + r, and publish
+                π = g^q mod N. The verifier confirms the identity:
+              </p>
+              <p class="math-equation">π<sup>ℓ</sup> · g<sup>r</sup> ≡ y (mod N)</p>
+              <div class="metric-grid">
+                <div class="metric-card">
+                  <span class="strip-label">r = 2^T mod ℓ</span>
+                  <code id="vdf-math-r" class="proof-bytes" aria-label="Wesolowski remainder r">Verify a proof to populate r.</code>
+                </div>
+              </div>
+              <p class="tiny-note">
+                Two exponentiations replace tens of thousands of sequential squarings — that ratio is
+                the speedup the verifier reports above.
+              </p>
+            </details>
           </article>
         </div>
       </section>
@@ -489,12 +598,12 @@ The delay turns strategic choice into blind choice.</pre>
           <article class="pane-card beacon-controls">
             <div class="slider-row">
               <label for="beacon-validators">Validators</label>
-              <input id="beacon-validators" type="range" min="3" max="8" value="4" />
+              <input id="beacon-validators" type="range" min="3" max="8" value="4" aria-describedby="beacon-validators-label" />
               <span id="beacon-validators-label">4 validators</span>
             </div>
             <div class="slider-row">
               <label for="beacon-exp">VDF delay</label>
-              <input id="beacon-exp" type="range" min="12" max="18" value="14" />
+              <input id="beacon-exp" type="range" min="12" max="18" value="14" aria-describedby="beacon-exp-label" />
               <span id="beacon-exp-label">2^14 squarings</span>
             </div>
             <label class="switch-row" for="beacon-malicious">
@@ -507,7 +616,7 @@ The delay turns strategic choice into blind choice.</pre>
                 <span>Beacon VDF</span>
                 <strong id="beacon-progress-text">0%</strong>
               </div>
-              <div id="beacon-progress" class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+              <div id="beacon-progress" class="progress-track" role="progressbar" aria-label="Beacon VDF progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
                 <span class="progress-fill green-fill"></span>
               </div>
             </div>
@@ -516,7 +625,7 @@ The delay turns strategic choice into blind choice.</pre>
           <article class="pane-card beacon-log-card">
             <div class="log-heading">
               <h3>Epoch 42 Randomness Beacon</h3>
-              <span class="tiny-note">aria-live log for the current round</span>
+              <span class="tiny-note">Steps announce live as the round runs</span>
             </div>
             <div id="beacon-log" class="beacon-log" role="log" aria-live="polite"></div>
           </article>
@@ -544,24 +653,40 @@ The delay turns strategic choice into blind choice.</pre>
         </div>
         <div class="comparison-wrap">
           <table class="comparison-table">
+            <caption class="sr-only">Comparison of VRF and VDF properties</caption>
             <thead>
               <tr>
-                <th>Property</th>
-                <th>VRF</th>
-                <th>VDF</th>
+                <th scope="col">Property</th>
+                <th scope="col">VRF</th>
+                <th scope="col">VDF</th>
               </tr>
             </thead>
             <tbody>
-              <tr><td>Key required?</td><td>Yes</td><td>No</td></tr>
-              <tr><td>Deterministic output?</td><td>Yes</td><td>Yes</td></tr>
-              <tr><td>Verifiable?</td><td>Yes</td><td>Yes</td></tr>
-              <tr><td>Unpredictable without secret?</td><td>Yes</td><td>Only after T sequential steps</td></tr>
-              <tr><td>Sequential computation?</td><td>No</td><td>Yes</td></tr>
-              <tr><td>Resists last-reveal alone?</td><td>Partially</td><td>Helps by delaying prediction</td></tr>
-              <tr><td>Post-quantum secure?</td><td>No</td><td>No</td></tr>
+              <tr><th scope="row">Key required?</th><td>Yes</td><td>No</td></tr>
+              <tr><th scope="row">Deterministic output?</th><td>Yes</td><td>Yes</td></tr>
+              <tr><th scope="row">Verifiable?</th><td>Yes</td><td>Yes</td></tr>
+              <tr><th scope="row">Unpredictable without secret?</th><td>Yes</td><td>Only after T sequential steps</td></tr>
+              <tr><th scope="row">Sequential computation?</th><td>No</td><td>Yes</td></tr>
+              <tr><th scope="row">Resists last-reveal alone?</th><td>Partially</td><td>Helps by delaying prediction</td></tr>
+              <tr><th scope="row">Post-quantum secure?</th><td>No</td><td>No</td></tr>
             </tbody>
           </table>
         </div>
+        <article class="post-quantum-note fidelity-note">
+          <h3>Cryptographic fidelity — what’s real here</h3>
+          <p>
+            <strong>The VRF is the real standard.</strong> It implements ECVRF-P256-SHA256-TAI
+            byte-for-byte per RFC 9381 — try-and-increment hash-to-curve, an RFC 6979 deterministic
+            nonce, the s = k + c·x response, and SEC1 compressed points. A known-answer test runs at
+            build time against the standard’s official Appendix B.1 vector, so the β and π produced
+            here would be accepted by any conforming verifier.
+          </p>
+          <p>
+            <strong>The VDF is an honest toy.</strong> The Wesolowski construction is genuine, but the
+            modulus N is small enough to run in a browser tab. Production VDFs use 2048-bit RSA moduli
+            or class groups of unknown order — never reuse these parameters for anything real.
+          </p>
+        </article>
         <article class="post-quantum-note">
           <h3>Post-Quantum Caveat</h3>
           <p>
@@ -642,6 +767,14 @@ async function populateVrfForAlpha(alphaText: string): Promise<void> {
   requireElement<HTMLElement>('#vrf-public-key').textContent = bytesToHex(keyPair.publicKeyBytes);
   requireElement<HTMLElement>('#vrf-beta').textContent = bytesToHex(output.beta);
   requireElement<HTMLElement>('#vrf-proof').textContent = serializeProof(output.proof);
+  requireElement<HTMLElement>('#vrf-math-h').textContent = bytesToHex(output.trace.hPoint);
+  requireElement<HTMLElement>('#vrf-math-h-ctr').textContent = `valid point found at counter ${output.trace.counter}`;
+  requireElement<HTMLElement>('#vrf-math-gamma').textContent = bytesToHex(output.proof.gamma);
+  requireElement<HTMLElement>('#vrf-math-u').textContent = bytesToHex(output.trace.uPoint);
+  requireElement<HTMLElement>('#vrf-math-v').textContent = bytesToHex(output.trace.vPoint);
+  requireElement<HTMLElement>('#vrf-math-c').textContent = bytesToHex(output.proof.c);
+  requireElement<HTMLElement>('#vrf-math-s').textContent = bytesToHex(output.proof.s);
+  requireElement<HTMLElement>('#vrf-math-beta').textContent = bytesToHex(output.beta);
   requireElement<HTMLInputElement>('#vrf-verify-alpha').value = alphaText;
   requireElement<HTMLTextAreaElement>('#vrf-verify-beta').value = bytesToHex(output.beta);
   requireElement<HTMLTextAreaElement>('#vrf-verify-proof').value = serializeProof(output.proof);
@@ -675,7 +808,7 @@ async function verifyCurrentVrf(): Promise<void> {
     const alpha = utf8ToBytes(requireElement<HTMLInputElement>('#vrf-verify-alpha').value);
     const beta = hexToBytes(requireElement<HTMLTextAreaElement>('#vrf-verify-beta').value);
     const proof = parseProof(requireElement<HTMLTextAreaElement>('#vrf-verify-proof').value);
-    const verification = await vrfVerify(keyPair.publicKeyBytes, alpha, { alpha, beta, proof });
+    const verification = await vrfVerify(keyPair.publicKeyBytes, alpha, { beta, proof });
 
     if (verification.valid) {
       setStatus(
@@ -707,6 +840,7 @@ async function refreshVdfDerivedState(): Promise<void> {
   requireElement<HTMLElement>('#vdf-modulus').textContent = shortHex(params.N, 20);
   requireElement<HTMLElement>('#vdf-group').textContent = shortHex(groupElement, 20);
   requireElement<HTMLElement>('#vdf-exp-label').textContent = `2^${params.T_exp} = ${params.T.toLocaleString()} squarings`;
+  requireElement<HTMLElement>('#vdf-math-t').textContent = `2^${params.T_exp}`;
 
   const toyEstimate = estimateVDFTime(params.T);
   const longer = estimateVDFTime(1 << 20);
@@ -780,6 +914,7 @@ async function verifyCurrentVdf(): Promise<void> {
   const valid = await vdfVerify(result.input, result.output, result.proof, params);
   const verifyMs = performance.now() - started;
   appState.vdf.verifyMs = verifyMs;
+  requireElement<HTMLElement>('#vdf-math-r').textContent = shortHex(powerOfTwoMod(params.T, result.prime), 24);
 
   if (valid) {
     const speedup = result.timeMs / Math.max(verifyMs, 0.001);

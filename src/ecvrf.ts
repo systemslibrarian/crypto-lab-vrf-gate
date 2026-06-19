@@ -3,27 +3,41 @@ import {
   bytesToBigInt,
   concatBytes,
   equalBytes,
-  numberToBytes,
-  utf8ToBytes,
 } from './utils/bytes.js';
 import {
   addPoints,
   AffinePoint,
-  bytesToPoint,
-  isOnCurve,
+  compressPoint,
+  decompressPoint,
   mod,
+  negatePoint,
   P256_G,
   P256_N,
-  P256_P,
-  pointToBytes,
-  scalarFromBytes,
   scalarMultiply,
   scalarToBytes,
-  sqrtModP,
+  tryDecompressEvenX,
 } from './utils/p256.js';
 
-const SUITE_STRING = utf8ToBytes('ECVRF-P256-SHA256');
-const PROOF_TO_HASH_DOMAIN = utf8ToBytes('ECVRF_proof_to_hash');
+/**
+ * ECVRF-P256-SHA256-TAI, implemented byte-exactly per RFC 9381.
+ *
+ * Verified against the official known-answer test vector in RFC 9381 Appendix B.1
+ * (Example 10, alpha = "sample") by scripts/check-rfc9381.ts. Every domain-separation
+ * octet, the SEC1 compressed point encoding, the RFC 6979 deterministic nonce, and the
+ * `s = k + c*x` response are required for that vector to match — so this is a faithful,
+ * interoperable VRF, not a look-alike.
+ */
+
+// Single-octet ciphersuite identifier for ECVRF-P256-SHA256-TAI (RFC 9381 Section 5.5).
+const SUITE_STRING = new Uint8Array([0x01]);
+// Fixed domain-separation octets used by the RFC's hash inputs.
+const ONE_STRING = new Uint8Array([0x01]);
+const TWO_STRING = new Uint8Array([0x02]);
+const THREE_STRING = new Uint8Array([0x03]);
+const ZERO_STRING = new Uint8Array([0x00]);
+
+const CHALLENGE_LENGTH = 16; // cLen for this ciphersuite (RFC 9381 Section 5.5).
+const SCALAR_LENGTH = 32; // qLen in octets.
 
 function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
   const copy = new Uint8Array(bytes.length);
@@ -34,24 +48,57 @@ function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
 export interface VRFKeyPair {
   privateKey: CryptoKey;
   publicKey: CryptoKey;
+  /** SEC1 compressed public-key point Y = x*B (33 bytes). */
   publicKeyBytes: Uint8Array;
+  /** The secret scalar x. Kept in memory so proving is deterministic per RFC 9381. */
+  secretScalar: bigint;
 }
 
 export interface VRFProof {
+  /** Compressed Gamma = x*H (33 bytes). */
   gamma: Uint8Array;
+  /** Challenge c (cLen = 16 bytes). */
   c: Uint8Array;
+  /** Response s = k + c*x mod q (qLen = 32 bytes). */
   s: Uint8Array;
+}
+
+/** Intermediate values exposed so the UI can "show the work" of a proof. */
+export interface VRFTrace {
+  /** Compressed H = encode_to_curve(PK, alpha). */
+  hPoint: Uint8Array;
+  /** try-and-increment counter that produced a valid H. */
+  counter: number;
+  /** Compressed U = k*B. */
+  uPoint: Uint8Array;
+  /** Compressed V = k*H. */
+  vPoint: Uint8Array;
+  /** The deterministic RFC 6979 nonce k (32 bytes). Exposed for the KAT, not the UI. */
+  nonce: Uint8Array;
 }
 
 export interface VRFOutput {
   beta: Uint8Array;
   proof: VRFProof;
   alpha: Uint8Array;
+  trace: VRFTrace;
 }
 
 async function sha256(...parts: Uint8Array[]): Promise<Uint8Array> {
   const hash = await crypto.subtle.digest('SHA-256', toArrayBuffer(concatBytes(...parts)));
   return new Uint8Array(hash);
+}
+
+async function hmacSha256(key: Uint8Array, message: Uint8Array): Promise<Uint8Array> {
+  const cryptoKey = await crypto.subtle.importKey(
+    'raw',
+    toArrayBuffer(key),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+  const signature = await crypto.subtle.sign('HMAC', cryptoKey, toArrayBuffer(message));
+  return new Uint8Array(signature);
 }
 
 function requirePoint(point: AffinePoint | null, label: string): AffinePoint {
@@ -60,16 +107,6 @@ function requirePoint(point: AffinePoint | null, label: string): AffinePoint {
   }
 
   return point;
-}
-
-async function exportPrivateScalar(privateKey: CryptoKey): Promise<bigint> {
-  const jwk = await crypto.subtle.exportKey('jwk', privateKey);
-
-  if (typeof jwk.d !== 'string') {
-    throw new Error('Private key scalar is unavailable');
-  }
-
-  return scalarFromBytes(base64UrlDecode(jwk.d));
 }
 
 function base64UrlDecode(value: string): Uint8Array {
@@ -85,185 +122,203 @@ function base64UrlDecode(value: string): Uint8Array {
   return result;
 }
 
-async function importRawPublicKey(pointBytes: Uint8Array): Promise<CryptoKey> {
-  return crypto.subtle.importKey(
-    'raw',
-    toArrayBuffer(pointBytes),
-    { name: 'ECDH', namedCurve: 'P-256' },
-    true,
-    [],
-  );
-}
+async function exportPrivateScalar(privateKey: CryptoKey): Promise<bigint> {
+  const jwk = await crypto.subtle.exportKey('jwk', privateKey);
 
-async function deriveEcdhXCoordinate(privateKey: CryptoKey, publicPointBytes: Uint8Array): Promise<Uint8Array> {
-  const publicKey = await importRawPublicKey(publicPointBytes);
-  const bits = await crypto.subtle.deriveBits({ name: 'ECDH', public: publicKey }, privateKey, 256);
-  return new Uint8Array(bits);
-}
-
-async function crossCheckXCoordinate(
-  privateKey: CryptoKey,
-  publicPointBytes: Uint8Array,
-  expectedPoint: AffinePoint,
-): Promise<void> {
-  const derivedX = await deriveEcdhXCoordinate(privateKey, publicPointBytes);
-  const expectedX = bigintToBytes(expectedPoint.x, 32);
-
-  if (!equalBytes(derivedX, expectedX)) {
-    throw new Error('WebCrypto ECDH cross-check failed');
+  if (typeof jwk.d !== 'string') {
+    throw new Error('Private key scalar is unavailable');
   }
+
+  return bytesToBigInt(base64UrlDecode(jwk.d));
 }
 
-async function randomScalar(): Promise<bigint> {
-  const buffer = new Uint8Array(32);
+/**
+ * ECVRF_encode_to_curve_try_and_increment (RFC 9381 Section 5.4.1.1).
+ *
+ * H = first valid point from arbitrary_string_to_point(
+ *       SHA-256(suite || 0x01 || salt || alpha || ctr || 0x00))
+ * where the salt is the compressed public key and ctr is a single octet. The point is
+ * read as a compressed encoding with even y; x >= p or a non-residue means "try ctr+1".
+ */
+export async function encodeToCurveTAI(
+  saltPublicKey: Uint8Array,
+  alpha: Uint8Array,
+): Promise<{ point: AffinePoint; counter: number }> {
+  for (let counter = 0; counter <= 0xff; counter += 1) {
+    const hash = await sha256(
+      SUITE_STRING,
+      ONE_STRING,
+      saltPublicKey,
+      alpha,
+      new Uint8Array([counter]),
+      ZERO_STRING,
+    );
+    const point = tryDecompressEvenX(hash);
 
-  while (true) {
-    crypto.getRandomValues(buffer);
-    const scalar = mod(bytesToBigInt(buffer), P256_N);
-
-    if (scalar !== 0n) {
-      return scalar;
+    if (point !== null) {
+      return { point, counter };
     }
+  }
+
+  throw new Error('encode_to_curve failed: exhausted try-and-increment counters');
+}
+
+/**
+ * ECVRF nonce generation via RFC 6979 (RFC 9381 Section 5.4.2.1).
+ * Deterministic HMAC-SHA256 DRBG over the secret scalar and h_string = compressed H.
+ */
+export async function nonceGenerationRFC6979(secretScalar: bigint, hString: Uint8Array): Promise<bigint> {
+  const h1 = await sha256(hString);
+  const secretOctets = bigintToBytes(secretScalar, SCALAR_LENGTH); // int2octets(x)
+  const messageOctets = bigintToBytes(mod(bytesToBigInt(h1), P256_N), SCALAR_LENGTH); // bits2octets(h1)
+
+  let v: Uint8Array = new Uint8Array(SCALAR_LENGTH).fill(0x01);
+  let k: Uint8Array = new Uint8Array(SCALAR_LENGTH).fill(0x00);
+
+  k = await hmacSha256(k, concatBytes(v, ZERO_STRING, secretOctets, messageOctets));
+  v = await hmacSha256(k, v);
+  k = await hmacSha256(k, concatBytes(v, ONE_STRING, secretOctets, messageOctets));
+  v = await hmacSha256(k, v);
+
+  for (;;) {
+    let t: Uint8Array = new Uint8Array(0);
+
+    while (t.length < SCALAR_LENGTH) {
+      v = await hmacSha256(k, v);
+      t = concatBytes(t, v);
+    }
+
+    const candidate = bytesToBigInt(t.slice(0, SCALAR_LENGTH)); // bits2int over qlen = 256 bits
+
+    if (candidate >= 1n && candidate < P256_N) {
+      return candidate;
+    }
+
+    k = await hmacSha256(k, concatBytes(v, ZERO_STRING));
+    v = await hmacSha256(k, v);
   }
 }
 
 /**
- * Generate a P-256 VRF keypair.
+ * ECVRF_challenge_generation (RFC 9381 Section 5.4.3).
+ * c = first cLen octets of SHA-256(suite || 0x02 || PK || H || Gamma || U || V || 0x00).
+ * The public key Y is the first hashed point — omitting it breaks interoperability.
  */
+export async function challengeGeneration(
+  publicKey: AffinePoint,
+  h: AffinePoint,
+  gamma: AffinePoint,
+  u: AffinePoint,
+  v: AffinePoint,
+): Promise<Uint8Array> {
+  const digest = await sha256(
+    SUITE_STRING,
+    TWO_STRING,
+    compressPoint(publicKey),
+    compressPoint(h),
+    compressPoint(gamma),
+    compressPoint(u),
+    compressPoint(v),
+    ZERO_STRING,
+  );
+  return digest.slice(0, CHALLENGE_LENGTH);
+}
+
+/**
+ * ECVRF_proof_to_hash (RFC 9381 Section 5.2).
+ * beta = SHA-256(suite || 0x03 || point_to_string(cofactor*Gamma) || 0x00).
+ * The P-256 cofactor is 1, so cofactor*Gamma is just Gamma (already compressed here).
+ */
+export async function proofToHash(gammaCompressed: Uint8Array): Promise<Uint8Array> {
+  return sha256(SUITE_STRING, THREE_STRING, gammaCompressed, ZERO_STRING);
+}
+
+/** Core ECVRF_prove (RFC 9381 Section 5.1) operating directly on the secret scalar. */
+export async function vrfProveScalar(secretScalar: bigint, alpha: Uint8Array): Promise<VRFOutput> {
+  const publicKeyPoint = requirePoint(scalarMultiply(secretScalar, P256_G), 'public key');
+  const publicKeyBytes = compressPoint(publicKeyPoint);
+
+  const { point: hPoint, counter } = await encodeToCurveTAI(publicKeyBytes, alpha);
+  const hCompressed = compressPoint(hPoint);
+  const gammaPoint = requirePoint(scalarMultiply(secretScalar, hPoint), 'Gamma');
+
+  const nonce = await nonceGenerationRFC6979(secretScalar, hCompressed);
+  const uPoint = requirePoint(scalarMultiply(nonce, P256_G), 'U');
+  const vPoint = requirePoint(scalarMultiply(nonce, hPoint), 'V');
+
+  const c = await challengeGeneration(publicKeyPoint, hPoint, gammaPoint, uPoint, vPoint);
+  const challengeScalar = bytesToBigInt(c);
+  const s = scalarToBytes(mod(nonce + challengeScalar * secretScalar, P256_N));
+
+  const gamma = compressPoint(gammaPoint);
+  const beta = await proofToHash(gamma);
+
+  return {
+    alpha: alpha.slice(),
+    beta,
+    proof: { gamma, c, s },
+    trace: {
+      hPoint: hCompressed,
+      counter,
+      uPoint: compressPoint(uPoint),
+      vPoint: compressPoint(vPoint),
+      nonce: bigintToBytes(nonce, SCALAR_LENGTH),
+    },
+  };
+}
+
+/** Generate a P-256 VRF keypair and cache the secret scalar for deterministic proving. */
 export async function vrfKeyGen(): Promise<VRFKeyPair> {
   const keyPair = await crypto.subtle.generateKey(
     { name: 'ECDH', namedCurve: 'P-256' },
     true,
     ['deriveBits'],
   );
-  const publicKeyBytes = new Uint8Array(await crypto.subtle.exportKey('raw', keyPair.publicKey));
+  const secretScalar = await exportPrivateScalar(keyPair.privateKey);
+  const publicKeyPoint = requirePoint(scalarMultiply(secretScalar, P256_G), 'public key');
 
   return {
     privateKey: keyPair.privateKey,
     publicKey: keyPair.publicKey,
-    publicKeyBytes,
+    publicKeyBytes: compressPoint(publicKeyPoint),
+    secretScalar,
   };
 }
 
-/**
- * ECVRF_encode_to_curve_try_and_increment (RFC 9381 Section 5.4.1.1).
- * Hashes (pk_bytes || alpha) to a P-256 curve point.
- * Tries ctr = 0, 1, 2, ... until valid point found.
- * Returns the curve point H as uncompressed bytes.
- */
-export async function hashToCurve(
-  pkBytes: Uint8Array,
-  alpha: Uint8Array,
-): Promise<Uint8Array> {
-  for (let counter = 0; counter < 65536; counter += 1) {
-    const digest = await sha256(SUITE_STRING, pkBytes, alpha, numberToBytes(counter, 4));
-    const x = mod(bytesToBigInt(digest), P256_P);
-    const rhs = mod(x * x * x - 3n * x + 0x5ac635d8aa3a93e7b3ebbd55769886bc651d06b0cc53b0f63bce3c3e27d2604bn, P256_P);
-    const y = sqrtModP(rhs);
-
-    if (y !== null) {
-      const point = { x, y: (y & 1n) === 0n ? y : P256_P - y };
-
-      if (isOnCurve(point)) {
-        return pointToBytes(point);
-      }
-    }
-  }
-
-  throw new Error('hashToCurve failed after exhausting try-and-increment counters');
-}
-
-/**
- * ECVRF_challenge_generation (RFC 9381 Section 5.4.3).
- * c = first 16 bytes of SHA-256(suite || 2 || H || Gamma || U || V)
- */
-export async function challengeGeneration(
-  H: Uint8Array,
-  Gamma: Uint8Array,
-  U: Uint8Array,
-  V: Uint8Array,
-): Promise<Uint8Array> {
-  const digest = await sha256(SUITE_STRING, new Uint8Array([0x02]), H, Gamma, U, V);
-  return digest.slice(0, 16);
-}
-
-/**
- * ECVRF_proof_to_hash (RFC 9381 Section 5.2).
- * beta = SHA-256("ECVRF_proof_to_hash" || cofactor*Gamma)
- */
-export async function proofToHash(gamma: Uint8Array): Promise<Uint8Array> {
-  return sha256(PROOF_TO_HASH_DOMAIN, gamma);
-}
-
-/**
- * ECVRF_prove (RFC 9381 Section 5.1).
- * Returns VRFOutput with beta and proof.
- */
-export async function vrfProve(
-  keyPair: VRFKeyPair,
-  alpha: Uint8Array,
-): Promise<VRFOutput> {
-  const secretScalar = await exportPrivateScalar(keyPair.privateKey);
-  const H = await hashToCurve(keyPair.publicKeyBytes, alpha);
-  const HPoint = bytesToPoint(H);
-  const gammaPoint = requirePoint(scalarMultiply(secretScalar, HPoint), 'Gamma');
-  await crossCheckXCoordinate(keyPair.privateKey, H, gammaPoint);
-
-  const nonceScalar = await randomScalar();
-  const UPoint = requirePoint(scalarMultiply(nonceScalar, P256_G), 'U');
-  const UBytes = pointToBytes(UPoint);
-  const VPoint = requirePoint(scalarMultiply(nonceScalar, HPoint), 'V');
-
-  const gammaBytes = pointToBytes(gammaPoint);
-  const VBytes = pointToBytes(VPoint);
-  const c = await challengeGeneration(H, gammaBytes, UBytes, VBytes);
-  const challengeScalar = bytesToBigInt(c);
-  const s = scalarToBytes(mod(nonceScalar - challengeScalar * secretScalar, P256_N));
-  const beta = await proofToHash(gammaBytes);
-
-  return {
-    alpha: alpha.slice(),
-    beta,
-    proof: {
-      gamma: gammaBytes,
-      c,
-      s,
-    },
-  };
+/** ECVRF_prove (RFC 9381 Section 5.1). */
+export async function vrfProve(keyPair: VRFKeyPair, alpha: Uint8Array): Promise<VRFOutput> {
+  return vrfProveScalar(keyPair.secretScalar, alpha);
 }
 
 /**
  * ECVRF_verify (RFC 9381 Section 5.3).
- * Returns { valid: boolean, beta?: Uint8Array }
+ * Reconstructs U = s*B - c*Y and V = s*H - c*Gamma, regenerates the challenge, and
+ * accepts only if it matches c and beta is the proof_to_hash of Gamma.
  */
 export async function vrfVerify(
   publicKeyBytes: Uint8Array,
   alpha: Uint8Array,
-  output: VRFOutput,
+  output: Pick<VRFOutput, 'beta' | 'proof'>,
 ): Promise<{ valid: boolean; beta?: Uint8Array }> {
   try {
-    const publicKeyPoint = bytesToPoint(publicKeyBytes);
-    const H = await hashToCurve(publicKeyBytes, alpha);
-    const HPoint = bytesToPoint(H);
-    const gammaPoint = bytesToPoint(output.proof.gamma);
-    const sScalar = scalarFromBytes(output.proof.s);
-    const cScalar = bytesToBigInt(output.proof.c);
+    const publicKeyPoint = decompressPoint(publicKeyBytes);
+    const { point: hPoint } = await encodeToCurveTAI(publicKeyBytes, alpha);
+    const gammaPoint = decompressPoint(output.proof.gamma);
+    const challengeScalar = bytesToBigInt(output.proof.c);
+    const sScalar = bytesToBigInt(output.proof.s);
 
-    const UPoint = requirePoint(
-      addPoints(scalarMultiply(sScalar, P256_G), scalarMultiply(cScalar, publicKeyPoint)),
+    const cY = scalarMultiply(challengeScalar, publicKeyPoint);
+    const uPoint = requirePoint(
+      addPoints(scalarMultiply(sScalar, P256_G), cY === null ? null : negatePoint(cY)),
       'U',
     );
-    const VPoint = requirePoint(
-      addPoints(scalarMultiply(sScalar, HPoint), scalarMultiply(cScalar, gammaPoint)),
+    const cGamma = scalarMultiply(challengeScalar, gammaPoint);
+    const vPoint = requirePoint(
+      addPoints(scalarMultiply(sScalar, hPoint), cGamma === null ? null : negatePoint(cGamma)),
       'V',
     );
 
-    const expectedChallenge = await challengeGeneration(
-      H,
-      output.proof.gamma,
-      pointToBytes(UPoint),
-      pointToBytes(VPoint),
-    );
+    const expectedChallenge = await challengeGeneration(publicKeyPoint, hPoint, gammaPoint, uPoint, vPoint);
     const beta = await proofToHash(output.proof.gamma);
     const valid = equalBytes(expectedChallenge, output.proof.c) && equalBytes(beta, output.beta);
 
