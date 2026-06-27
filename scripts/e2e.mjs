@@ -99,8 +99,10 @@ try {
   // Accessibility — dark theme (default).
   await runAxe(page, 'dark');
 
-  // Accessibility — light theme.
-  await page.locator('#theme-toggle').click();
+  // Accessibility — light theme. The shared crypto-lab header hides the lab's
+  // own #theme-toggle and exposes its own #cl-theme-toggle; both drive the same
+  // documentElement[data-theme]. Click the visible header control.
+  await page.locator('#cl-theme-toggle').click();
   await page.waitForFunction(() => document.documentElement.getAttribute('data-theme') === 'light', { timeout: 5000 });
   note(true, 'theme toggle switches to light');
   await runAxe(page, 'light');
