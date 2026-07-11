@@ -627,7 +627,7 @@ The delay turns strategic choice into blind choice.</pre>
               <h3>Epoch 42 Randomness Beacon</h3>
               <span class="tiny-note">Steps announce live as the round runs</span>
             </div>
-            <div id="beacon-log" class="beacon-log" role="log" aria-live="polite"></div>
+            <div id="beacon-log" class="beacon-log" role="log" aria-live="polite" aria-label="Randomness beacon round log" tabindex="0"></div>
           </article>
         </div>
       </section>
