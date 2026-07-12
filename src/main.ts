@@ -226,37 +226,23 @@ function currentVdfParams(explicitExp?: number): VDFParams {
 function renderApp(): void {
   app.innerHTML = `
     <main class="page-shell" id="main-content" tabindex="-1" aria-label="VRF and VDF crypto lab">
-      <header class="hero-panel">
-        <div class="hero-copy">
-          <p class="kicker">crypto-lab-vrf-gate</p>
-          <h1>VRFs and VDFs: Provable Randomness in Time</h1>
-          <p class="hero-text">
-            A browser lab for deterministic public-key randomness, sequential time-locks, and why
-            blockchains need both when the cost of bias is high.
+      <header class="cl-hero">
+        <div class="cl-hero-main">
+          <h1 class="cl-hero-title">VRF + VDF</h1>
+          <p class="cl-hero-sub">ECVRF · RFC 9381 · Wesolowski VDF</p>
+          <p class="cl-hero-desc">
+            Compute and publicly verify a keyed VRF output, run a sequential time-lock VDF, then chain
+            both into a live RANDAO + VDF randomness beacon you can watch resist withholding.
           </p>
-          <div class="hero-ribbon">
-            <span class="badge beta">VRF: sealed output</span>
-            <span class="badge proof">VDF: elapsed time proof</span>
-            <span class="badge valid">RFC 9381-verified</span>
-          </div>
         </div>
-        <div class="hero-ornament" aria-hidden="true">
-          <div class="clock-face">
-            <span class="clock-core"></span>
-            <span class="clock-hand clock-hand-hour"></span>
-            <span class="clock-hand clock-hand-minute"></span>
-          </div>
-          <div class="seal-stack">
-            <div class="seal-card">
-              <span class="seal-title">Verifier</span>
-              <span class="seal-stamp">✓ public proof</span>
-            </div>
-            <div class="seal-card offset">
-              <span class="seal-title">Producer</span>
-              <span class="seal-stamp">sk → β, π</span>
-            </div>
-          </div>
-        </div>
+        <aside class="cl-hero-why" aria-label="Why it matters">
+          <span class="cl-hero-why-label">WHY IT MATTERS</span>
+          <p class="cl-hero-why-text">
+            Blockchains pick leaders and lotteries from public randomness, so any predictable or
+            grindable bias is money on the table. VRFs make randomness unforgeable; VDFs delay it past
+            the point where an attacker can preview and rig the outcome.
+          </p>
+        </aside>
         <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Switch to light mode" aria-pressed="false">🌙</button>
       </header>
 
