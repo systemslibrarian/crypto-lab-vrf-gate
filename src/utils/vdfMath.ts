@@ -29,6 +29,29 @@ export function modPow(base: bigint, exponent: bigint, modulus: bigint): bigint 
   return result;
 }
 
+export function gcd(a: bigint, b: bigint): bigint {
+  let x = a < 0n ? -a : a;
+  let y = b < 0n ? -b : b;
+
+  while (y !== 0n) {
+    const remainder = x % y;
+    x = y;
+    y = remainder;
+  }
+
+  return x;
+}
+
+export function lcm(a: bigint, b: bigint): bigint {
+  if (a === 0n || b === 0n) {
+    return 0n;
+  }
+
+  const x = a < 0n ? -a : a;
+  const y = b < 0n ? -b : b;
+  return (x / gcd(x, y)) * y;
+}
+
 export function repeatedSquaring(
   g: bigint,
   N: bigint,

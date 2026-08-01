@@ -30,6 +30,7 @@ import {
   TOY_PARAMS,
   estimateVDFTime,
   hashToGroup,
+  skipVdfDelay,
   vdfEval,
   vdfProve,
   vdfVerify,
@@ -43,11 +44,14 @@ interface AppState {
     output: VRFOutput | null;
     uniquenessRuns: string[];
     comparison: { current: string; changed: string } | null;
+    /** True once the learner types their own comparison α′, so it stops auto-deriving. */
+    comparisonEdited: boolean;
   };
   vdf: {
     inputHex: string;
     groupElement: bigint | null;
     result: VDFResult | null;
+    shortcut: { y: bigint; timeMs: number; T: number } | null;
     verifyMs: number | null;
     progress: number;
     squarings: number;
@@ -126,11 +130,13 @@ const appState: AppState = {
     output: null,
     uniquenessRuns: [],
     comparison: null,
+    comparisonEdited: false,
   },
   vdf: {
     inputHex: '',
     groupElement: null,
     result: null,
+    shortcut: null,
     verifyMs: null,
     progress: 0,
     squarings: 0,
@@ -270,7 +276,8 @@ function renderApp(): void {
             <p>
               Producing the output takes a fixed number of <em>sequential</em> steps; no amount of
               parallel hardware speeds it up. Checking the answer afterward is near-instant. It proves
-              real time elapsed.
+              real time elapsed — provided nobody knows how the modulus factors, which is exactly the
+              provision Exhibit 2's toy parameters fail.
             </p>
           </article>
           <article class="primer-card">
@@ -310,6 +317,14 @@ function renderApp(): void {
             <div class="field-group">
               <label for="vrf-alpha">Input α</label>
               <input id="vrf-alpha" type="text" value="block-1847-leader-selection" />
+            </div>
+            <div class="field-group">
+              <label for="vrf-alpha-compare">Compare against α′</label>
+              <input id="vrf-alpha-compare" type="text" aria-describedby="vrf-alpha-compare-note" />
+              <p id="vrf-alpha-compare-note" class="tiny-note">
+                Starts as your α with one character changed, and follows α until you edit it. Type
+                anything here — the pseudorandomness claim is about a difference <em>you</em> chose.
+              </p>
             </div>
             <div class="info-strip">
               <div>
@@ -381,7 +396,7 @@ function renderApp(): void {
               </article>
               <article class="property-card">
                 <h3>Pseudorandomness</h3>
-                <p id="vrf-compare-result">Change α and compare outputs that look unrelated to the eye.</p>
+                <p id="vrf-compare-result">Compute the VRF to compare β for α and for your α′.</p>
               </article>
             </div>
           </article>
@@ -417,8 +432,10 @@ function renderApp(): void {
           <p class="section-index">Exhibit 2</p>
           <h2>What Is a VDF? The Time-Lock</h2>
           <p>
-            Evaluation requires real sequential squarings. Verification checks a proof that is far
-            cheaper than replaying the whole delay.
+            In the construction, evaluation requires T sequential squarings that cannot be
+            short-cut, and verification checks a proof far cheaper than replaying them. The
+            squarings below are real; the compulsion to run them is not — this toy's modulus has
+            published factors. Both halves are shown honestly.
           </p>
         </div>
         <div class="split-pane vdf-layout">
@@ -428,7 +445,8 @@ function renderApp(): void {
               <code>N = p · n</code> is the product of the NIST P-256 field prime and curve order —
               both public constants. Knowing the factors, anyone reduces the exponent mod
               <code>λ(N)</code> and gets this same output in one modular exponentiation, skipping
-              every squaring below. A real VDF needs a modulus whose order nobody knows.
+              every squaring below. The “Skip the delay” button does it, so you can check. A real
+              VDF needs a modulus whose order nobody knows.
             </p>
             <div class="field-group">
               <label for="vdf-input">Input x (hex)</label>
@@ -451,7 +469,18 @@ function renderApp(): void {
             </div>
             <div class="button-row">
               <button id="vdf-evaluate" type="button">Evaluate VDF</button>
+              <button id="vdf-skip" class="ghost-button" type="button">Skip the delay (λ shortcut)</button>
               <button id="vdf-verify" class="ghost-button" type="button">Verify Proof</button>
+            </div>
+            <p id="vdf-skip-status" class="status-pill" data-tone="neutral" role="status" aria-live="polite">
+              The factors of N are published, so the delay can be skipped outright. Press “Skip the
+              delay” to get the same y from one modular exponentiation, at any T.
+            </p>
+            <div class="metric-grid">
+              <div class="metric-card wide">
+                <span class="strip-label">2^T mod λ(N) — the exponent an adversary uses instead</span>
+                <code id="vdf-skip-exponent" class="proof-bytes" aria-label="Reduced VDF exponent">Skip the delay to populate the reduced exponent.</code>
+              </div>
             </div>
             <div class="progress-block">
               <div class="progress-headline">
@@ -497,7 +526,7 @@ function renderApp(): void {
             <div class="timing-callouts">
               <div class="callout-card">
                 <h3>Measured in this browser</h3>
-                <p id="vdf-speedup">Verification will report its speedup after a proof is checked.</p>
+                <p id="vdf-speedup">Verification will report its cost against recomputing the chain once a proof is checked.</p>
               </div>
               <div class="callout-card">
                 <h3>Real-world scaling</h3>
@@ -507,9 +536,16 @@ function renderApp(): void {
             <details class="math-reveal">
               <summary>See the math — why verifying is fast</summary>
               <p>
-                Evaluation runs <strong id="vdf-math-t">2^16</strong> modular squarings
-                <em>in sequence</em>: y = g^(2^T) mod N. Each squaring needs the one before it, so
-                extra cores can’t help — that sequential chain <em>is</em> the delay.
+                <strong>In the construction</strong> — a Wesolowski VDF over a modulus of
+                <em>unknown</em> order — evaluation runs <strong id="vdf-math-t">2^16</strong> modular
+                squarings <em>in sequence</em>: y = g^(2^T) mod N. Each squaring needs the one before
+                it, so extra cores can’t help, and that sequential chain <em>is</em> the delay.
+              </p>
+              <p class="tiny-note">
+                <strong>In this instance</strong>, it is not. This page's N is the product of two
+                published primes, so its factorization is public, and anyone can reduce the exponent
+                mod λ(N) and reach the same y in one exponentiation. The chain below is the long way
+                round, taken voluntarily. See “Cryptographic fidelity” at the foot of the page.
               </p>
               <p>
                 Wesolowski makes checking cheap. Hash to a prime ℓ, write 2^T = q·ℓ + r, and publish
@@ -524,7 +560,8 @@ function renderApp(): void {
               </div>
               <p class="tiny-note">
                 Two exponentiations replace tens of thousands of sequential squarings — that ratio is
-                the speedup the verifier reports above.
+                what the verifier reports above. Read it as “verification versus recomputing the
+                chain”, not as a delay an adversary is forced to pay: here they are not.
               </p>
             </details>
           </article>
@@ -658,11 +695,17 @@ The delay turns strategic choice into blind choice.</pre>
               <tr><th scope="row">Deterministic output?</th><td>Yes</td><td>Yes</td></tr>
               <tr><th scope="row">Verifiable?</th><td>Yes</td><td>Yes</td></tr>
               <tr><th scope="row">Unpredictable without secret?</th><td>Yes</td><td>Only after T sequential steps</td></tr>
-              <tr><th scope="row">Sequential computation?</th><td>No</td><td>Yes</td></tr>
+              <tr><th scope="row">Sequential computation?</th><td>No</td><td>Yes — for the construction, over a modulus of unknown order. <strong>Not for this toy instance</strong>, whose N has public factors, so the chain is skippable.</td></tr>
               <tr><th scope="row">Resists last-reveal alone?</th><td>Partially</td><td>Helps by delaying prediction</td></tr>
               <tr><th scope="row">Post-quantum secure?</th><td>No</td><td>No</td></tr>
             </tbody>
           </table>
+          <p class="tiny-note">
+            The VDF column describes the <em>construction</em>. Every property that depends on the
+            delay — sequentiality, unpredictability before T steps, resistance to a last revealer —
+            requires a modulus whose order nobody knows. The instance on this page does not have one,
+            so for it those cells read “no”. The fidelity note below says exactly why.
+          </p>
         </div>
         <article class="post-quantum-note fidelity-note">
           <h3>Cryptographic fidelity — what’s real here</h3>
@@ -690,7 +733,9 @@ The delay turns strategic choice into blind choice.</pre>
             <em>single</em> modular exponentiation — for any T, however far you push the slider. So
             the sequential delay here is not weak, it is <strong>zero</strong>. The progress bar
             measures how long your browser chose to take the long way round, not work an adversary
-            would be forced to do.
+            would be forced to do. Do not take this on faith: the “Skip the delay (λ shortcut)”
+            button in Exhibit 2 runs exactly that computation and returns the identical y in about a
+            millisecond, at every setting of the delay slider.
           </p>
           <p>
             That is precisely why a real VDF needs a modulus of <em>unknown</em> order: an RSA modulus
@@ -759,6 +804,43 @@ function writeBeaconLog(lines: string[]): void {
   log.innerHTML = lines.map((line) => `<p>${line}</p>`).join('');
 }
 
+/**
+ * The learner's α with exactly one character changed. Prefer bumping the last digit, so
+ * "block-1847-leader-selection" becomes "block-1848-leader-selection" — the realistic
+ * related input a validator actually faces — and fall back to the last character.
+ */
+function nearbyAlpha(alphaText: string): string {
+  if (alphaText.length === 0) {
+    return 'a';
+  }
+
+  for (let index = alphaText.length - 1; index >= 0; index -= 1) {
+    const code = alphaText.charCodeAt(index);
+
+    if (code >= 0x30 && code <= 0x39) {
+      const next = code === 0x39 ? 0x30 : code + 1;
+      return alphaText.slice(0, index) + String.fromCharCode(next) + alphaText.slice(index + 1);
+    }
+  }
+
+  const last = alphaText.length - 1;
+  const code = alphaText.charCodeAt(last);
+  return alphaText.slice(0, last) + String.fromCharCode(code === 0x7a ? 0x61 : code + 1);
+}
+
+function countDifferingBytes(a: Uint8Array, b: Uint8Array): number {
+  const length = Math.max(a.length, b.length);
+  let differing = 0;
+
+  for (let index = 0; index < length; index += 1) {
+    if (a[index] !== b[index]) {
+      differing += 1;
+    }
+  }
+
+  return differing;
+}
+
 async function populateVrfForAlpha(alphaText: string): Promise<void> {
   const keyPair = appState.vrf.keyPair;
 
@@ -768,7 +850,17 @@ async function populateVrfForAlpha(alphaText: string): Promise<void> {
 
   const alpha = utf8ToBytes(alphaText);
   const output = await vrfProve(keyPair, alpha);
-  const comparisonAlpha = utf8ToBytes('block-1848-leader-selection');
+  // The comparison input belongs to the learner. It was hardcoded to one fixed string, so
+  // whatever α you typed was always compared against that same string and the "related
+  // inputs give unrelated outputs" claim was never about a change you made.
+  const comparisonField = requireElement<HTMLInputElement>('#vrf-alpha-compare');
+
+  if (!appState.vrf.comparisonEdited || comparisonField.value.length === 0) {
+    comparisonField.value = nearbyAlpha(alphaText);
+  }
+
+  const comparisonText = comparisonField.value;
+  const comparisonAlpha = utf8ToBytes(comparisonText);
   const changedOutput = await vrfProve(keyPair, comparisonAlpha);
 
   appState.vrf.output = output;
@@ -791,8 +883,13 @@ async function populateVrfForAlpha(alphaText: string): Promise<void> {
   requireElement<HTMLInputElement>('#vrf-verify-alpha').value = alphaText;
   requireElement<HTMLTextAreaElement>('#vrf-verify-beta').value = bytesToHex(output.beta);
   requireElement<HTMLTextAreaElement>('#vrf-verify-proof').value = serializeProof(output.proof);
+  const differingBytes = countDifferingBytes(output.beta, changedOutput.beta);
+  const verdict =
+    comparisonText === alphaText
+      ? 'α′ is identical to α, so β is identical too — that is determinism. Change one character to see pseudorandomness.'
+      : `${differingBytes} of ${output.beta.length} β bytes differ. Nothing about how close α and α′ are is visible in the outputs.`;
   requireElement<HTMLElement>('#vrf-compare-result').textContent =
-    `α = "${alphaText}" -> β = ${shortHex(output.beta)}; α = "block-1848-leader-selection" -> β = ${shortHex(changedOutput.beta)}.`;
+    `α = "${alphaText}" -> β = ${shortHex(output.beta)}; α′ = "${comparisonText}" -> β = ${shortHex(changedOutput.beta)}. ${verdict}`;
   setStatus(requireElement<HTMLElement>('#vrf-verify-status'), 'Verification status is waiting for a proof.', 'neutral');
 }
 
@@ -914,6 +1011,74 @@ async function runVdfDemo(): Promise<void> {
   }
 }
 
+/** Clear the shortcut readout when T or the input changes, so it never describes stale work. */
+function resetVdfShortcutReadout(): void {
+  appState.vdf.shortcut = null;
+  requireElement<HTMLElement>('#vdf-skip-exponent').textContent = 'Skip the delay to populate the reduced exponent.';
+  setStatus(
+    requireElement<HTMLElement>('#vdf-skip-status'),
+    'The factors of N are published, so the delay can be skipped outright. Press “Skip the delay” to get the same y from one modular exponentiation, at any T.',
+    'neutral',
+  );
+}
+
+/**
+ * The fidelity note, executable. Reaches the same y as the 65,536-squaring chain in about a
+ * millisecond, because the toy modulus has published factors — and says so in the same
+ * breath, comparing against the chain's own output when one is on screen.
+ */
+async function runVdfShortcut(): Promise<void> {
+  const skipButton = requireElement<HTMLButtonElement>('#vdf-skip');
+  const status = requireElement<HTMLElement>('#vdf-skip-status');
+  skipButton.disabled = true;
+
+  try {
+    await refreshVdfDerivedState();
+
+    if (appState.vdf.groupElement === null) {
+      throw new Error('VDF group element is unavailable');
+    }
+
+    const params = currentVdfParams();
+    const shortcut = skipVdfDelay(appState.vdf.groupElement, params);
+
+    if (shortcut === null) {
+      throw new Error('The λ shortcut does not apply to these parameters — nothing was skipped.');
+    }
+
+    appState.vdf.shortcut = { y: shortcut.y, timeMs: shortcut.timeMs, T: params.T };
+    requireElement<HTMLElement>('#vdf-skip-exponent').textContent = shortHex(shortcut.exponent, 24);
+
+    const chain = appState.vdf.result;
+    const comparable = chain !== null && chain.input === appState.vdf.groupElement && chain.steps === params.T;
+    const headline =
+      `y = ${shortHex(shortcut.y, 24)} in ${shortcut.timeMs.toFixed(2)}ms — one modular exponentiation, ` +
+      `zero squarings. λ(N) = lcm(p − 1, n − 1) is public, so the exponent reduces to 2^T mod λ(N) ` +
+      `and this cost is the same at every T the slider offers.`;
+
+    if (!comparable) {
+      setStatus(
+        status,
+        `${headline} Press “Evaluate VDF” with this same input and T to watch the ${params.T.toLocaleString()}-squaring chain arrive at the identical value.`,
+        'warn',
+      );
+      return;
+    }
+
+    setStatus(
+      status,
+      chain.output === shortcut.y
+        ? `${headline} Byte-identical to the ${chain.steps.toLocaleString()}-squaring chain, which took ${chain.timeMs.toFixed(0)}ms. That is what “the delay is zero, not merely short” means.`
+        : `${headline} It does NOT match the chain's output, which should be impossible — treat this page as broken.`,
+      chain.output === shortcut.y ? 'warn' : 'bad',
+    );
+  } catch (error) {
+    setStatus(status, (error as Error).message, 'bad');
+  } finally {
+    skipButton.disabled = false;
+  }
+}
+
 async function verifyCurrentVdf(): Promise<void> {
   const result = appState.vdf.result;
 
@@ -936,8 +1101,11 @@ async function verifyCurrentVdf(): Promise<void> {
       `✓ VERIFIED in ${verifyMs.toFixed(2)}ms using the simplified Wesolowski check π^ℓ · g^r = y mod N.`,
       'good',
     );
+    // Deliberately NOT called a speedup: an unqualified "N× faster" implies the long way
+    // round is forced, and on this toy modulus it is not. The ratio is verification versus
+    // recomputing the chain — real, and not a delay any adversary has to pay.
     requireElement<HTMLElement>('#vdf-speedup').textContent =
-      `Verification took ${verifyMs.toFixed(2)}ms versus ${result.timeMs.toFixed(0)}ms to evaluate. Observed speedup: ${speedup.toFixed(1)}×.`;
+      `Verification took ${verifyMs.toFixed(2)}ms versus ${result.timeMs.toFixed(0)}ms to recompute the chain — ${speedup.toFixed(1)}× cheaper than replaying the squarings. That ratio is verification vs. recomputation, not a delay an adversary is forced to pay: this toy's N has published factors, so the chain is skippable.`;
     return;
   }
 
@@ -1043,6 +1211,12 @@ function bindControls(): void {
   requireElement<HTMLButtonElement>('#vrf-compute').addEventListener('click', async () => {
     await populateVrfForAlpha(requireElement<HTMLInputElement>('#vrf-alpha').value);
   });
+  requireElement<HTMLInputElement>('#vrf-alpha-compare').addEventListener('input', () => {
+    appState.vrf.comparisonEdited = true;
+  });
+  requireElement<HTMLInputElement>('#vrf-alpha-compare').addEventListener('change', async () => {
+    await populateVrfForAlpha(requireElement<HTMLInputElement>('#vrf-alpha').value);
+  });
   requireElement<HTMLButtonElement>('#vrf-uniqueness').addEventListener('click', async () => {
     await runVrfUniquenessDemo();
   });
@@ -1061,15 +1235,20 @@ function bindControls(): void {
     }
   });
   requireElement<HTMLTextAreaElement>('#vdf-input').addEventListener('change', async () => {
+    resetVdfShortcutReadout();
     await refreshVdfDerivedState();
   });
   requireElement<HTMLInputElement>('#vdf-exp').addEventListener('input', async (event) => {
     const value = Number((event.currentTarget as HTMLInputElement).value);
     requireElement<HTMLElement>('#vdf-exp-label').textContent = `2^${value} = ${(1 << value).toLocaleString()} squarings`;
+    resetVdfShortcutReadout();
     await refreshVdfDerivedState();
   });
   requireElement<HTMLButtonElement>('#vdf-evaluate').addEventListener('click', async () => {
     await runVdfDemo();
+  });
+  requireElement<HTMLButtonElement>('#vdf-skip').addEventListener('click', async () => {
+    await runVdfShortcut();
   });
   requireElement<HTMLButtonElement>('#vdf-verify').addEventListener('click', async () => {
     await verifyCurrentVdf();

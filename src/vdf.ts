@@ -1,5 +1,5 @@
 import { bigintToBytes, bytesToBigInt, concatBytes } from './utils/bytes.js';
-import { mod, modPow, powerOfTwoDivmod, powerOfTwoMod, repeatedSquaring } from './utils/vdfMath.js';
+import { gcd, lcm, mod, modPow, powerOfTwoDivmod, powerOfTwoMod, repeatedSquaring } from './utils/vdfMath.js';
 
 export interface VDFParams {
   N: bigint;
@@ -230,6 +230,47 @@ export const TOY_PARAMS: VDFParams = {
   T: 1 << 16,
   T_exp: 16,
 };
+
+export interface VDFShortcut {
+  /** The same y the sequential chain produces — byte for byte. */
+  y: bigint;
+  /** lcm(p-1, q-1): the Carmichael function of the toy modulus, computable by anyone. */
+  lambda: bigint;
+  /** The reduced exponent 2^T mod lambda(N), which is what actually gets exponentiated. */
+  exponent: bigint;
+  timeMs: number;
+}
+
+/**
+ * The shortcut this toy modulus cannot prevent — the fidelity note, executable.
+ *
+ * A VDF's entire guarantee is that reaching y costs T sequential squarings. That rests on
+ * nobody knowing how N factors. Here everybody does: N = TOY_P * TOY_Q, two constants
+ * published in FIPS 186-4. So anyone computes lambda(N) = lcm(p-1, q-1), reduces the
+ * exponent to 2^T mod lambda(N), and gets the identical y from ONE modular exponentiation.
+ * g^(2^T) = g^(2^T mod lambda(N)) (mod N) whenever gcd(g, N) = 1, for any T however large.
+ *
+ * Returns null when the shortcut genuinely does not apply — a modulus that is not this toy
+ * one, or a g sharing a factor with N — so the page can never claim to have skipped a delay
+ * it did not skip.
+ */
+export function skipVdfDelay(g: bigint, params: VDFParams): VDFShortcut | null {
+  if (params.N !== TOY_P * TOY_Q) {
+    return null;
+  }
+
+  const base = mod(g, params.N);
+
+  if (gcd(base, params.N) !== 1n) {
+    return null;
+  }
+
+  const started = performance.now();
+  const lambda = lcm(TOY_P - 1n, TOY_Q - 1n);
+  const exponent = modPow(2n, BigInt(params.T), lambda);
+  const y = modPow(base, exponent, params.N);
+  return { y, lambda, exponent, timeMs: performance.now() - started };
+}
 
 export function estimateVDFTime(T_squarings: number): { seconds: number; minutes: number; hours: number } {
   const seconds = T_squarings / 1_000_000;
