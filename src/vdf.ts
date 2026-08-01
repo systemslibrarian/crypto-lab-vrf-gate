@@ -16,6 +16,15 @@ export interface VDFResult {
   timeMs: number;
 }
 
+// TOY ONLY. These are the NIST P-256 field prime and the P-256 curve order,
+// both published in FIPS 186-4 and already used by this repo's VRF exhibit.
+// Their product is a valid modulus for the Wesolowski construction in form only:
+// a VDF's delay guarantee requires that NOBODY knows how N factors, and here
+// everybody does. Given p and n, an adversary computes lambda(N) = lcm(p-1, n-1),
+// reduces the exponent to 2^T mod lambda(N), and reproduces the output with ONE
+// modular exponentiation for any T. The sequential delay is not small; it is
+// nonexistent. Real deployments use an RSA modulus from a ceremony where no
+// participant learns the factors, or a class group of unknown order.
 const TOY_P = 0xffffffff00000001000000000000000000000000ffffffffffffffffffffffffn;
 const TOY_Q = 0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551n;
 
@@ -51,7 +60,27 @@ function decompose(n: bigint): { r: bigint; d: bigint } {
   return { r, d };
 }
 
-export function isProbablePrime(n: bigint, k = 20): boolean {
+/**
+ * Fixed-base Miller-Rabin witnesses. The first seven are the deterministic
+ * witness set that decides primality exactly for n < 3.317 * 10^24
+ * (Sorenson & Webster); the last two are spares. Because the base list is
+ * fixed, this is a 9-round test and cannot be asked for more.
+ */
+const MILLER_RABIN_BASES = [2n, 325n, 9375n, 28178n, 450775n, 9780504n, 1795265022n, 7952650221n, 113n];
+
+/**
+ * Miller-Rabin primality test over the fixed base set above.
+ *
+ * `k` caps the number of rounds and now defaults to the number of bases
+ * available. It previously defaulted to 20, advertising more than twice the
+ * rounds the base list could ever supply — `Math.min(k, bases.length)` silently
+ * clamped it to 9, so the extra rounds were never run.
+ *
+ * Above the deterministic bound the answer is probabilistic. That is acceptable
+ * for the only caller, `hashToPrime`: a composite Fiat-Shamir "prime" would make
+ * the Wesolowski proof fail verification, not be silently accepted.
+ */
+export function isProbablePrime(n: bigint, k = MILLER_RABIN_BASES.length): boolean {
   if (n < 2n) {
     return false;
   }
@@ -73,7 +102,7 @@ export function isProbablePrime(n: bigint, k = 20): boolean {
   }
 
   const { r, d } = decompose(n);
-  const bases = [2n, 325n, 9375n, 28178n, 450775n, 9780504n, 1795265022n, 7952650221n, 113n];
+  const bases = MILLER_RABIN_BASES;
   const rounds = Math.min(k, bases.length);
 
   for (let index = 0; index < rounds; index += 1) {

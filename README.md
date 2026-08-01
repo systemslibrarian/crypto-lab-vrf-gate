@@ -4,15 +4,15 @@
 
 This demo combines ECVRF-P256-SHA256 and a Wesolowski VDF over an RSA-style group to show how public randomness can be both verifiable and delayed. The VRF side solves the problem of proving that a deterministic pseudorandom output came from one specific public key and input without exposing the secret key. The VDF side solves the problem of forcing a sequential delay before the final randomness can be known while keeping verification much cheaper than evaluation. The security model is asymmetric and publicly verifiable, uses WebCrypto plus exact BigInt arithmetic, and is not post-quantum secure.
 
-The VRF is **byte-exact RFC 9381** (ciphersuite ECVRF-P256-SHA256-TAI): try-and-increment hash-to-curve, an RFC 6979 deterministic nonce, the `s = k + c·x` response, and SEC1 compressed points. A known-answer test (`npm run check:rfc9381`) reproduces the standard's official Appendix B.1 test vector — H, k, U, V, π, and β all match — and runs in CI before every deploy, so the outputs here would be accepted by any conforming verifier. The VDF is an intentionally small "toy" Wesolowski construction for in-browser speed; production VDFs use 2048-bit RSA moduli or class groups of unknown order. Each exhibit has a layered **"See the math"** panel that exposes these intermediate values live.
+The VRF is **byte-exact RFC 9381** (ciphersuite ECVRF-P256-SHA256-TAI): try-and-increment hash-to-curve, an RFC 6979 deterministic nonce, the `s = k + c·x` response, and SEC1 compressed points. A known-answer test (`npm run check:rfc9381`) reproduces the standard's official Appendix B.1 test vector — H, k, U, V, π, and β all match — and runs in CI before every deploy, so the outputs here would be accepted by any conforming verifier. The VDF is an intentionally broken "toy" Wesolowski construction, and the page says so where you run it. The construction is genuine, but its modulus is `N = p · n` — the NIST P-256 field prime times the P-256 curve order, both public constants. A VDF derives its delay entirely from nobody knowing how N factors; here everybody does, so anyone can reduce the exponent mod `λ(N) = lcm(p − 1, n − 1)` and reproduce the output with a single modular exponentiation, for any T. The delay is not short, it is zero. Production VDFs need a modulus of unknown order — an RSA modulus from a ceremony where no participant learns the factors, or a class group. Each exhibit has a layered **"See the math"** panel that exposes these intermediate values live.
 
 ## When to Use It
 
 - Use it to teach validator selection or randomness beacons in proof-of-stake systems. The demo shows why a VRF gives unique verifiable contributions while a VDF delays strategic prediction.
 - Use it to compare deterministic public-key randomness against plain hashing. The VRF exhibit shows that the same key and input always yield the same verifiable output, which a plain hash cannot restrict to one producer.
 - Use it to explain last-reveal bias in commit-reveal protocols. The beacon simulation shows how withholding changes the RANDAO branch and why the VDF turns that into a blind choice.
-- Use it to inspect toy VDF timing and proof verification tradeoffs. The VDF exhibit exposes the delay parameter slider, progress bar, and proof verification path directly in the browser.
-- Do NOT use it as a production cryptography library. The implementation is educational, uses a toy RSA-style modulus for the VDF, and is not a post-quantum-secure or hardened deployment package.
+- Use it to inspect VDF proof-verification structure and the shape of the evaluate/verify asymmetry. The exhibit exposes the delay slider, progress bar, and verification path directly in the browser — but read the timings as illustration only, since this modulus provides no real sequential work.
+- Do NOT use it as a production cryptography library. The implementation is educational, the VDF modulus has publicly known factors and therefore enforces no delay at all, and nothing here is post-quantum-secure or hardened for deployment.
 
 ## Live Demo
 
@@ -24,7 +24,7 @@ In the browser you can generate and verify VRF outputs, run the VDF with a live 
 
 - A VRF needs a unique, secret-derived nonce; a biased or reused nonce in the `s = k + c·x` response can leak the secret key, the same class of failure that breaks ECDSA.
 - Hash-to-curve must be implemented carefully (try-and-increment, correct ciphersuite tag); a flawed mapping can bias outputs or break verifier interoperability.
-- The toy Wesolowski VDF here uses a small modulus and offers no real delay guarantee; a production VDF needs a 2048-bit RSA modulus or a class group of unknown order.
+- The toy Wesolowski VDF offers no delay guarantee whatsoever, and the reason is the factorisation rather than the size: `N` is the product of two famous published primes, so `λ(N)` is public and the whole sequential computation collapses to one modular exponentiation. A production VDF needs a modulus whose order nobody knows — a 2048-bit RSA modulus from a trusted ceremony, or a class group.
 - VDF security assumes inherently sequential computation; specialized or parallel hardware can shrink the intended delay below the protocol's assumptions.
 - In commit-reveal beacons the last participant to reveal can choose to withhold and bias the result — the "last-revealer" problem a VDF is meant to neutralize.
 

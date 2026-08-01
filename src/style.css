@@ -478,6 +478,19 @@ footer {
   background: rgba(255, 170, 0, 0.1);
 }
 
+/* The reason the toy VDF is insecure, sitting directly under the banner that
+   announces it — a learner should not have to scroll to the fidelity note to
+   find out that the delay this exhibit appears to demonstrate does not exist. */
+.warning-subnote {
+  margin: 0.6rem 0 0;
+  padding: 0.7rem 0.9rem;
+  border-left: 3px solid var(--amber);
+  border-radius: 0 0.5rem 0.5rem 0;
+  background: rgba(255, 170, 0, 0.06);
+  font-size: 0.85rem;
+  line-height: 1.55;
+}
+
 .status-pill[data-tone='good'] {
   color: var(--green);
   border-color: rgba(0, 255, 136, 0.3);

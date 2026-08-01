@@ -423,7 +423,13 @@ function renderApp(): void {
         </div>
         <div class="split-pane vdf-layout">
           <article class="pane-card vdf-card">
-            <p class="warning-banner">TOY VDF — NOT PRODUCTION SECURE</p>
+            <p class="warning-banner">TOY VDF — THE DELAY IS ZERO, NOT MERELY SHORT</p>
+            <p class="warning-subnote">
+              <code>N = p · n</code> is the product of the NIST P-256 field prime and curve order —
+              both public constants. Knowing the factors, anyone reduces the exponent mod
+              <code>λ(N)</code> and gets this same output in one modular exponentiation, skipping
+              every squaring below. A real VDF needs a modulus whose order nobody knows.
+            </p>
             <div class="field-group">
               <label for="vdf-input">Input x (hex)</label>
               <textarea id="vdf-input" rows="3"></textarea>
@@ -668,9 +674,30 @@ The delay turns strategic choice into blind choice.</pre>
             here would be accepted by any conforming verifier.
           </p>
           <p>
-            <strong>The VDF is an honest toy.</strong> The Wesolowski construction is genuine, but the
-            modulus N is small enough to run in a browser tab. Production VDFs use 2048-bit RSA moduli
-            or class groups of unknown order — never reuse these parameters for anything real.
+            <strong>The VDF is an honest toy, and the delay is the part that is fake.</strong> The
+            Wesolowski construction itself is genuine — the squarings, the Fiat–Shamir prime, and the
+            proof check are all real. But a VDF's whole guarantee is that producing the output takes
+            <em>T sequential steps that cannot be parallelised or short-cut</em>, and that rests
+            entirely on nobody knowing how N factors. Here <code>N = p · n</code>, where
+            <code>p</code> is the NIST P-256 field prime and <code>n</code> is the P-256 curve order —
+            two of the most widely published constants in cryptography, printed in FIPS 186-4 and
+            reused from this very page's VRF exhibit.
+          </p>
+          <p>
+            The factors are therefore not merely findable, they are already known to everyone. Anyone
+            can compute <code>λ(N) = lcm(p − 1, n − 1)</code>, reduce the exponent to
+            <code>2<sup>T</sup> mod λ(N)</code>, and get the identical output from a
+            <em>single</em> modular exponentiation — for any T, however far you push the slider. So
+            the sequential delay here is not weak, it is <strong>zero</strong>. The progress bar
+            measures how long your browser chose to take the long way round, not work an adversary
+            would be forced to do.
+          </p>
+          <p>
+            That is precisely why a real VDF needs a modulus of <em>unknown</em> order: an RSA modulus
+            from a ceremony in which no participant learns the factors, or a class group of an
+            imaginary quadratic field, whose order nobody knows how to compute. Production parameters
+            are also far larger than these 512 bits — but size is the second problem here, not the
+            first. Never reuse these parameters for anything real.
           </p>
         </article>
         <article class="post-quantum-note">
