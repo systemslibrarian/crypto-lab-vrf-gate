@@ -116,11 +116,28 @@ export async function applyVDF(round: BeaconRound, params: VDFParams): Promise<B
   return round;
 }
 
+export interface BeaconVerification {
+  valid: boolean;
+  failures: string[];
+  /** VRF proofs actually re-verified against their public key. */
+  vrfProofsChecked: number;
+  /** Validators whose proof could not be checked because they never revealed it. */
+  vrfProofsSkipped: number;
+  /** Whether computeRANDAO was re-run and compared against the stored mix. */
+  randaoRecomputed: boolean;
+  /** Whether the Wesolowski identity was actually evaluated for this round. */
+  vdfProofChecked: boolean;
+}
+
 export async function verifyBeaconRound(
   round: BeaconRound,
   params: VDFParams,
-): Promise<{ valid: boolean; failures: string[] }> {
+): Promise<BeaconVerification> {
   const failures: string[] = [];
+  let vrfProofsChecked = 0;
+  let vrfProofsSkipped = 0;
+  let randaoRecomputed = false;
+  let vdfProofChecked = false;
 
   for (const validator of round.validators) {
     if (!validator.committed || !validator.vrfOutput) {
@@ -141,8 +158,12 @@ export async function verifyBeaconRound(
       failures.push(`${validator.id} commitment does not match its VRF output`);
     }
 
-    if (!validator.withheld) {
+    if (validator.withheld) {
+      // Nothing to verify: a withheld proof was never published. Counted, not claimed.
+      vrfProofsSkipped += 1;
+    } else {
       const verification = await vrfVerify(validator.keyPair.publicKeyBytes, round.epochSeed, validator.vrfOutput);
+      vrfProofsChecked += 1;
 
       if (!verification.valid) {
         failures.push(`${validator.id} VRF proof failed verification`);
@@ -152,6 +173,7 @@ export async function verifyBeaconRound(
 
   if (round.randaoMix) {
     const computed = computeRANDAO(round);
+    randaoRecomputed = true;
 
     if (!equalBytes(computed, round.randaoMix)) {
       failures.push('RANDAO mix does not match the revealed VRF outputs');
@@ -171,6 +193,7 @@ export async function verifyBeaconRound(
       round.vdfResult.proof,
       params,
     );
+    vdfProofChecked = true;
 
     if (!verified) {
       failures.push('VDF proof failed verification');
@@ -188,5 +211,9 @@ export async function verifyBeaconRound(
   return {
     valid: failures.length === 0,
     failures,
+    vrfProofsChecked,
+    vrfProofsSkipped,
+    randaoRecomputed,
+    vdfProofChecked,
   };
 }

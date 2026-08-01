@@ -65,6 +65,14 @@ function decompose(n: bigint): { r: bigint; d: bigint } {
  * witness set that decides primality exactly for n < 3.317 * 10^24
  * (Sorenson & Webster); the last two are spares. Because the base list is
  * fixed, this is a 9-round test and cannot be asked for more.
+ *
+ * That guarantee is a theorem about these exact integers, so they have to be
+ * used verbatim. This code used to compute the witness as
+ * `mod(base, n - 3) + 2`, which for every n it is actually asked about shifts
+ * the whole list up by two — running bases 4, 327, 9377, ... instead. Base 4 in
+ * particular is a strictly weaker witness than base 2, and no published
+ * deterministic bound covers the shifted set, so the documented bound did not
+ * apply to what ran.
  */
 const MILLER_RABIN_BASES = [2n, 325n, 9375n, 28178n, 450775n, 9780504n, 1795265022n, 7952650221n, 113n];
 
@@ -76,9 +84,15 @@ const MILLER_RABIN_BASES = [2n, 325n, 9375n, 28178n, 450775n, 9780504n, 17952650
  * rounds the base list could ever supply — `Math.min(k, bases.length)` silently
  * clamped it to 9, so the extra rounds were never run.
  *
- * Above the deterministic bound the answer is probabilistic. That is acceptable
- * for the only caller, `hashToPrime`: a composite Fiat-Shamir "prime" would make
- * the Wesolowski proof fail verification, not be silently accepted.
+ * Above the deterministic bound the answer is probabilistic, and `hashToPrime`
+ * — the only caller — works on ~256-bit candidates, far above it. Be clear about
+ * what a wrong answer would cost: a composite ell would NOT be caught by the
+ * verifier. Prover and verifier both derive ell from the same
+ * `hashToPrime(g, y, T)`, and the Wesolowski identity pi^ell * g^r = y holds for
+ * any ell whatever, prime or not, because 2^T = q*ell + r is just division. ell's
+ * primality is what makes the proof *sound* — what stops a cheating prover
+ * producing a convincing pi without doing the squarings — not what makes the
+ * verifier's arithmetic close.
  */
 export function isProbablePrime(n: bigint, k = MILLER_RABIN_BASES.length): boolean {
   if (n < 2n) {
@@ -106,7 +120,15 @@ export function isProbablePrime(n: bigint, k = MILLER_RABIN_BASES.length): boole
   const rounds = Math.min(k, bases.length);
 
   for (let index = 0; index < rounds; index += 1) {
-    const a = mod(bases[index], n - 3n) + 2n;
+    // Use the witness verbatim. Only fold it into range when n is smaller than the
+    // base itself; a in {0, 1, n-1} carries no information, so skip rather than
+    // pretend a round happened.
+    const a = mod(bases[index], n);
+
+    if (a < 2n || a > n - 2n) {
+      continue;
+    }
+
     let x = modPow(a, d, n);
 
     if (x === 1n || x === n - 1n) {
@@ -270,15 +292,6 @@ export function skipVdfDelay(g: bigint, params: VDFParams): VDFShortcut | null {
   const exponent = modPow(2n, BigInt(params.T), lambda);
   const y = modPow(base, exponent, params.N);
   return { y, lambda, exponent, timeMs: performance.now() - started };
-}
-
-export function estimateVDFTime(T_squarings: number): { seconds: number; minutes: number; hours: number } {
-  const seconds = T_squarings / 1_000_000;
-  return {
-    seconds,
-    minutes: seconds / 60,
-    hours: seconds / 3600,
-  };
 }
 
 export async function runVdf(g: bigint, params: VDFParams): Promise<VDFResult> {

@@ -28,7 +28,6 @@ import {
 import { powerOfTwoMod } from './utils/vdfMath.js';
 import {
   TOY_PARAMS,
-  estimateVDFTime,
   hashToGroup,
   skipVdfDelay,
   vdfEval,
@@ -51,6 +50,12 @@ interface AppState {
     inputHex: string;
     groupElement: bigint | null;
     result: VDFResult | null;
+    /**
+     * The parameters the current result was actually produced under. Verification used to
+     * read the live slider instead, so moving T after evaluating made the page recompute a
+     * different Fiat-Shamir prime and print "INVALID" over a perfectly good proof.
+     */
+    resultParams: VDFParams | null;
     shortcut: { y: bigint; timeMs: number; T: number } | null;
     verifyMs: number | null;
     progress: number;
@@ -87,15 +92,15 @@ const problemAttempts = [
 
 const deploymentCards = [
   {
-    title: 'Ethereum RANDAO + VDF',
+    title: 'Ethereum RANDAO (VDF not shipped)',
     detail:
-      'RANDAO is live for validator shuffling and committee selection. VDF integration remains an active engineering effort rather than a completed mainnet primitive.',
-    note: 'Use: beacon-chain randomness. Status: RANDAO deployed, VDF research and integration ongoing.',
+      'RANDAO is live on the beacon chain for validator shuffling and committee selection, and it carries the last-revealer bias this page demonstrates. The VDF that was meant to remove that bias was never deployed: the VDF Alliance ASIC programme that Ethereum backed has published nothing since 2020.',
+    note: 'Use: beacon-chain randomness. Status: RANDAO deployed; the VDF layer remains a research proposal, not a mainnet primitive.',
   },
   {
-    title: 'Chainlink VRF v2',
+    title: 'Chainlink VRF (v2.5)',
     detail:
-      'An on-chain verifiable randomness service built on similar principles to ECVRF, used for NFT mints, games, lotteries, and betting markets across multiple chains.',
+      'An on-chain verifiable randomness service built on similar principles to ECVRF, used for NFT mints, games, lotteries, and betting markets across multiple chains. v2.5 is the current version; v2 is marked deprecated in Chainlink’s own docs.',
     note: 'Use: verifiable request-response randomness. Not this exact ciphersuite.',
   },
   {
@@ -136,6 +141,7 @@ const appState: AppState = {
     inputHex: '',
     groupElement: null,
     result: null,
+    resultParams: null,
     shortcut: null,
     verifyMs: null,
     progress: 0,
@@ -148,7 +154,7 @@ const appState: AppState = {
     logLines: [],
     progress: 0,
     squarings: 0,
-    summary: 'Run a beacon round to see how withholding changes the RANDAO mix and why the VDF still blocks selective prediction.',
+    summary: 'Run a beacon round to see how withholding changes the RANDAO mix, and where a VDF of unknown order would sit in the pipeline to block selective prediction. Note that this page\'s toy VDF does not block it — its modulus has published factors, so the delay is zero. Exhibit 2\'s "Skip the delay" button demonstrates that.',
   },
 };
 
@@ -904,7 +910,35 @@ async function runVrfUniquenessDemo(): Promise<void> {
   const alpha = utf8ToBytes(alphaText);
   const runs = await Promise.all(Array.from({ length: 5 }, async () => vrfProve(keyPair, alpha)));
   appState.vrf.uniquenessRuns = runs.map((entry, index) => `run ${index + 1}: ${shortHex(entry.beta)}`);
-  requireElement<HTMLElement>('#vrf-uniqueness-result').textContent = appState.vrf.uniquenessRuns.join(' • ');
+
+  // Compute the verdict instead of printing five hex strings under a heading and leaving
+  // the reader to eyeball a 12-character prefix. All 32 bytes are compared, and every
+  // proof is put through vrfVerify — the same code path the Verifier pane uses.
+  const allBetasAgree = runs.every((entry) => equalBytes(entry.beta, runs[0].beta));
+  const allProofsAgree = runs.every(
+    (entry) =>
+      equalBytes(entry.proof.gamma, runs[0].proof.gamma) &&
+      equalBytes(entry.proof.c, runs[0].proof.c) &&
+      equalBytes(entry.proof.s, runs[0].proof.s),
+  );
+  const verifications = await Promise.all(
+    runs.map(async (entry) => vrfVerify(keyPair.publicKeyBytes, alpha, entry)),
+  );
+  const acceptedCount = verifications.filter((entry) => entry.valid).length;
+
+  // The other half of uniqueness: no *second* beta verifies for the same (pk, alpha).
+  // Flip one bit of beta and confirm the verifier rejects it, rather than asserting it.
+  const rival = { beta: runs[0].beta.slice(), proof: runs[0].proof };
+  rival.beta[0] ^= 0x01;
+  const rivalAccepted = (await vrfVerify(keyPair.publicKeyBytes, alpha, rival)).valid;
+
+  const verdict =
+    allBetasAgree && allProofsAgree && acceptedCount === runs.length && !rivalAccepted
+      ? `all 5 runs returned byte-identical β and π (all ${runs[0].beta.length} bytes of β compared, not just the prefix shown), all 5 verified, and a β with one bit flipped was rejected`
+      : `CHECK FAILED — β agree: ${allBetasAgree}, π agree: ${allProofsAgree}, verified: ${acceptedCount}/${runs.length}, rival β accepted: ${rivalAccepted}. Treat this page as broken.`;
+
+  requireElement<HTMLElement>('#vrf-uniqueness-result').textContent =
+    `${appState.vrf.uniquenessRuns.join(' • ')} — ${verdict}.`;
 }
 
 async function verifyCurrentVrf(): Promise<void> {
@@ -952,11 +986,42 @@ async function refreshVdfDerivedState(): Promise<void> {
   requireElement<HTMLElement>('#vdf-exp-label').textContent = `2^${params.T_exp} = ${params.T.toLocaleString()} squarings`;
   requireElement<HTMLElement>('#vdf-math-t').textContent = `2^${params.T_exp}`;
 
-  const toyEstimate = estimateVDFTime(params.T);
-  const longer = estimateVDFTime(1 << 20);
-  const epochScale = estimateVDFTime(1 << 25);
+  renderVdfScaling();
+}
+
+/**
+ * Scale the projection off the rate this browser actually sustained, once there is one.
+ * Before that, say plainly that the 1,000,000 squarings/s figure is an assumption nothing
+ * on the page has measured — it used to be printed as the only number in the panel, beside
+ * a panel of genuinely measured timings, with no way to tell the two apart.
+ */
+function renderVdfScaling(): void {
+  const params = currentVdfParams();
+  const result = appState.vdf.result;
+  const measuredRate =
+    result && result.timeMs > 0 ? result.steps / (result.timeMs / 1000) : null;
+  const rate = measuredRate ?? 1_000_000;
+  const seconds = (squarings: number): number => squarings / rate;
+  const duration = (squarings: number): string => {
+    const value = seconds(squarings);
+
+    if (value < 1) {
+      return `${(value * 1000).toFixed(0)}ms`;
+    }
+
+    return value < 120 ? `${value.toFixed(2)}s` : `${(value / 60).toFixed(1)} minutes`;
+  };
+  const provenance =
+    measuredRate === null
+      ? 'assuming 1,000,000 squarings/s — a round number, not something this page has measured; press “Evaluate VDF” and this panel reprojects off your machine’s real rate'
+      : `at the ${Math.round(measuredRate).toLocaleString()} squarings/s this browser just sustained over ${result?.steps.toLocaleString()} squarings of the 512-bit toy modulus`;
+
   requireElement<HTMLElement>('#vdf-estimate').textContent =
-    `Toy estimate at ${params.T.toLocaleString()} squarings: ${toyEstimate.seconds.toFixed(2)}s if the machine sustains 1M squarings/s. Real RSA-2048 VDFs are much slower. At 2^20 squarings that same back-of-envelope rate is ${longer.seconds.toFixed(2)}s, and at 2^25 it is ${epochScale.hours.toFixed(2)}h before accounting for the larger modulus cost.`;
+    `At ${params.T.toLocaleString()} squarings: ${duration(params.T)} ${provenance}. ` +
+    `Extrapolating the same rate, 2^20 squarings is ${duration(1 << 20)} and 2^25 is ` +
+    `${duration(1 << 25)}. Read those as arithmetic on one measurement, not as a delay: ` +
+    `this modulus factors publicly, so nobody is forced to run the chain at all, and a production RSA-2048 ` +
+    `modulus would square far slower per step than 512 bits does.`;
 }
 
 async function runVdfDemo(): Promise<void> {
@@ -992,6 +1057,7 @@ async function runVdfDemo(): Promise<void> {
       steps: evaluation.squarings,
       timeMs: evaluation.timeMs,
     };
+    appState.vdf.resultParams = params;
     appState.vdf.verifyMs = null;
     updateVdfProgress(100, evaluation.squarings, evaluation.timeMs, 0);
     requireElement<HTMLElement>('#vdf-output').textContent = shortHex(evaluation.y, 24);
@@ -1004,11 +1070,37 @@ async function runVdfDemo(): Promise<void> {
     );
     requireElement<HTMLElement>('#vdf-speedup').textContent =
       `Evaluation took ${evaluation.timeMs.toFixed(0)}ms for ${evaluation.squarings.toLocaleString()} sequential squarings.`;
+    renderVdfScaling();
   } catch (error) {
     setStatus(requireElement<HTMLElement>('#vdf-verify-status'), (error as Error).message, 'bad');
   } finally {
     evaluateButton.disabled = false;
   }
+}
+
+/**
+ * Drop the evaluated proof bundle when T or the input changes. The y/ℓ/π on screen belong
+ * to the parameters they were computed under, and leaving them visible next to controls that
+ * now say something else invites the reader to believe a proof was checked for settings it
+ * was never built for.
+ */
+function clearVdfResultReadout(): void {
+  appState.vdf.result = null;
+  appState.vdf.resultParams = null;
+  appState.vdf.verifyMs = null;
+  requireElement<HTMLElement>('#vdf-output').textContent = '—';
+  requireElement<HTMLElement>('#vdf-prime').textContent = '—';
+  requireElement<HTMLElement>('#vdf-proof').textContent = '—';
+  requireElement<HTMLElement>('#vdf-math-r').textContent = 'Verify a proof to populate r.';
+  updateVdfProgress(0, 0, 0, 0);
+  setStatus(
+    requireElement<HTMLElement>('#vdf-verify-status'),
+    'Parameters changed — evaluate the VDF again to produce a proof for these settings.',
+    'neutral',
+  );
+  requireElement<HTMLElement>('#vdf-speedup').textContent =
+    'Verification will report its cost against recomputing the chain once a proof is checked.';
+  renderVdfScaling();
 }
 
 /** Clear the shortcut readout when T or the input changes, so it never describes stale work. */
@@ -1081,13 +1173,17 @@ async function runVdfShortcut(): Promise<void> {
 
 async function verifyCurrentVdf(): Promise<void> {
   const result = appState.vdf.result;
+  // Verify against the parameters this proof was built with, not whatever the slider
+  // happens to read now. The Fiat-Shamir prime is ell = hashToPrime(g, y, T); reading a
+  // moved slider changes T, so ell changes, the identity misses, and the page accused a
+  // valid proof of being forged.
+  const params = appState.vdf.resultParams;
 
-  if (!result) {
+  if (!result || !params) {
     setStatus(requireElement<HTMLElement>('#vdf-verify-status'), 'Evaluate the VDF before verifying it.', 'bad');
     return;
   }
 
-  const params = currentVdfParams();
   const started = performance.now();
   const valid = await vdfVerify(result.input, result.output, result.proof, params);
   const verifyMs = performance.now() - started;
@@ -1098,7 +1194,7 @@ async function verifyCurrentVdf(): Promise<void> {
     const speedup = result.timeMs / Math.max(verifyMs, 0.001);
     setStatus(
       requireElement<HTMLElement>('#vdf-verify-status'),
-      `✓ VERIFIED in ${verifyMs.toFixed(2)}ms using the simplified Wesolowski check π^ℓ · g^r = y mod N.`,
+      `✓ VERIFIED in ${verifyMs.toFixed(2)}ms using the simplified Wesolowski check π^ℓ · g^r = y mod N, at the T = 2^${params.T_exp} this proof was built for.`,
       'good',
     );
     // Deliberately NOT called a speedup: an unqualified "N× faster" implies the long way
@@ -1182,18 +1278,34 @@ async function runBeaconDemo(): Promise<void> {
     round.finalRandomness = await sha256BigInt(evaluation.y);
 
     appState.beacon.logLines.push(`y = ${shortHex(evaluation.y)} (computed in ${evaluation.timeMs.toFixed(0)}ms)`);
-    appState.beacon.logLines.push(`Proof π verified input: ℓ = ${shortHex(proofBundle.prime)}`);
+    // Generated, not yet checked — verifyBeaconRound below is what checks it. The log used
+    // to read "Proof π verified input", announcing a verification that had not happened.
+    appState.beacon.logLines.push(
+      `Wesolowski proof generated (not yet checked): π = ${shortHex(proofBundle.proof)}, ℓ = ${shortHex(proofBundle.prime)}`,
+    );
     appState.beacon.logLines.push(`Final randomness = SHA-256(y) = ${shortHex(round.finalRandomness)}`);
 
     const verification = await verifyBeaconRound(round, params);
+    // Report the checks that actually ran. A withheld validator publishes no proof, so
+    // there is nothing to verify for it — saying "all VRF proofs passed" overstated that.
+    const skippedNote =
+      verification.vrfProofsSkipped > 0
+        ? ` ${verification.vrfProofsSkipped} withheld and published no proof to check.`
+        : '';
     appState.beacon.logLines.push(
       verification.valid
-        ? 'Beacon verification: ✓ all VRF proofs, RANDAO, and VDF checks passed.'
+        ? `Beacon verification: ✓ ${verification.vrfProofsChecked} of ${round.validators.length} VRF proofs re-verified against their public keys` +
+          `${verification.randaoRecomputed ? ', RANDAO recomputed from the revealed βs' : ''}` +
+          `${verification.vdfProofChecked ? ', and π^ℓ · g^r ≡ y checked' : ''}.${skippedNote}`
         : `Beacon verification failed: ${verification.failures.join('; ')}`,
     );
+    // What the VDF does here is nothing: this toy modulus has published factors, so the
+    // "delay" a malicious validator would have to wait out costs one modular exponentiation.
+    // The claim that the VDF blinds their choice is a claim about the construction, and
+    // Exhibit 2's shortcut button falsifies it for this instance.
     appState.beacon.summary = malicious
-      ? 'Residual bias remains: a malicious validator still chooses whether to reveal, but the VDF prevents them from knowing which branch they prefer before the delay completes.'
-      : 'Honest round complete: the final randomness is the VDF-delayed output of the fully revealed RANDAO mix.';
+      ? 'Residual bias remains: a malicious validator still chooses whether to reveal. In the construction — a VDF over a modulus of unknown order — that choice is blind, because they cannot evaluate the delayed output for either branch in time. Not here: this toy N factors publicly, so either branch can be evaluated instantly and the choice stays fully informed.'
+      : 'Honest round complete: the final randomness is SHA-256 of the VDF output over the fully revealed RANDAO mix. Every VRF proof, the mix, and the Wesolowski identity were re-checked above — but the VDF contributed no delay, because this toy modulus factors publicly.';
     requireElement<HTMLElement>('#beacon-summary').textContent = appState.beacon.summary;
     writeBeaconLog(appState.beacon.logLines);
     updateBeaconProgress(100, evaluation.squarings);
@@ -1236,12 +1348,14 @@ function bindControls(): void {
   });
   requireElement<HTMLTextAreaElement>('#vdf-input').addEventListener('change', async () => {
     resetVdfShortcutReadout();
+    clearVdfResultReadout();
     await refreshVdfDerivedState();
   });
   requireElement<HTMLInputElement>('#vdf-exp').addEventListener('input', async (event) => {
     const value = Number((event.currentTarget as HTMLInputElement).value);
     requireElement<HTMLElement>('#vdf-exp-label').textContent = `2^${value} = ${(1 << value).toLocaleString()} squarings`;
     resetVdfShortcutReadout();
+    clearVdfResultReadout();
     await refreshVdfDerivedState();
   });
   requireElement<HTMLButtonElement>('#vdf-evaluate').addEventListener('click', async () => {
