@@ -48,8 +48,6 @@ interface AppState {
      */
     outputAlpha: string | null;
     uniquenessRuns: string[];
-    /** The α the five uniqueness runs were made over, so the verdict can retire when α moves. */
-    uniquenessAlpha: string | null;
     comparison: { current: string; changed: string } | null;
     /** True once the learner types their own comparison α′, so it stops auto-deriving. */
     comparisonEdited: boolean;
@@ -151,7 +149,6 @@ const appState: AppState = {
     output: null,
     outputAlpha: null,
     uniquenessRuns: [],
-    uniquenessAlpha: null,
     comparison: null,
     comparisonEdited: false,
   },
@@ -894,16 +891,6 @@ async function populateVrfForAlpha(alphaText: string): Promise<void> {
     changed: shortHex(changedOutput.beta),
   };
 
-  // The five uniqueness runs were made over whatever α was current when the button was
-  // pressed. Recomputing for a different α leaves that card quoting β prefixes that no
-  // longer match the β printed right above it, so retire it rather than let it endorse a
-  // determinism check it never ran for this input.
-  if (appState.vrf.uniquenessAlpha !== null && appState.vrf.uniquenessAlpha !== alphaText) {
-    appState.vrf.uniquenessAlpha = null;
-    appState.vrf.uniquenessRuns = [];
-    requireElement<HTMLElement>('#vrf-uniqueness-result').textContent = VRF_UNIQUENESS_IDLE;
-  }
-
   requireElement<HTMLElement>('#vrf-public-key').textContent = bytesToHex(keyPair.publicKeyBytes);
   requireElement<HTMLElement>('#vrf-beta').textContent = bytesToHex(output.beta);
   requireElement<HTMLElement>('#vrf-proof').textContent = serializeProof(output.proof);
@@ -936,7 +923,6 @@ async function populateVrfForAlpha(alphaText: string): Promise<void> {
 function retireVrfProducerReadout(): void {
   appState.vrf.output = null;
   appState.vrf.outputAlpha = null;
-  appState.vrf.uniquenessAlpha = null;
   appState.vrf.uniquenessRuns = [];
   appState.vrf.comparison = null;
 
@@ -1014,7 +1000,6 @@ async function runVrfUniquenessDemo(): Promise<void> {
       ? `all 5 runs returned byte-identical β and π (all ${runs[0].beta.length} bytes of β compared, not just the prefix shown), all 5 verified, and a β with one bit flipped was rejected`
       : `CHECK FAILED — β agree: ${allBetasAgree}, π agree: ${allProofsAgree}, verified: ${acceptedCount}/${runs.length}, rival β accepted: ${rivalAccepted}. Treat this page as broken.`;
 
-  appState.vrf.uniquenessAlpha = alphaText;
   requireElement<HTMLElement>('#vrf-uniqueness-result').textContent =
     `${appState.vrf.uniquenessRuns.join(' • ')} — ${verdict}.`;
 }
