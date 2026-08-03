@@ -52,11 +52,14 @@ npm run dev
 ## Verification
 
 ```bash
-npm run check   # phase logic checks + RFC 9381 known-answer test
-npm run e2e     # headless Chromium: drives the real UI + axe accessibility scan
+npm run check        # phase logic checks + RFC 9381 known-answer test
+npm run e2e          # headless Chromium: drives the real UI + axe accessibility scan
+npm run test:browser # Playwright: 31 claims tests + 2 axe scans
 ```
 
-`npm run check` proves the VRF reproduces the RFC 9381 Appendix B.1 vector. `npm run e2e` builds the app, boots it in headless Chromium, exercises VRF compute/verify/tamper and VDF evaluate/verify, asserts no console errors and no horizontal overflow at a 360px viewport, and runs an [axe-core](https://github.com/dequelabs/axe-core) accessibility scan (WCAG 2.0/2.1 A + AA) in both dark and light themes — currently zero violations. Both run in CI before every deploy.
+`npm run check` proves the VRF reproduces the RFC 9381 Appendix B.1 vector, and covers the two rejections the UI has no button for — a proof checked against a different public key, and a modified VDF output. `npm run e2e` builds the app, boots it in headless Chromium, exercises VRF compute/verify/tamper and VDF evaluate/verify, asserts no console errors and no horizontal overflow at a 360px viewport, and runs an [axe-core](https://github.com/dequelabs/axe-core) accessibility scan (WCAG 2.0/2.1 A + AA) in both dark and light themes — currently zero violations.
+
+`npm run test:browser` runs the claims suite in `e2e/claims.spec.ts` alongside those axe scans. It asserts no fixed cryptographic values: every expectation is one page-computed value checked against another — the "See the math" panel against the proof JSON, the five uniqueness runs against β, the reported β-byte distance against two β the page printed, the λ shortcut's y against the squaring chain's y, the verification cost ratio against the two timings it quotes, and the beacon's verified-proof count against its validator count. It also drives each failure path (tampered β, wrong α, tampered π, unparseable proof, verifying before evaluating, non-hex x) and asserts that no verdict survives an edit to the input that produced it. All three commands run in CI before every deploy.
 
 ---
 

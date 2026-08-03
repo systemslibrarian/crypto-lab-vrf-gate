@@ -14,7 +14,7 @@
     "check:rfc9381": "tsc -p tsconfig.scripts.json && node --experimental-specifier-resolution=node .tmp-checks/scripts/check-rfc9381.js",
     "check": "npm run check:phase1 && npm run check:phase2 && npm run check:phase3 && npm run check:rfc9381",
     "e2e": "npm run build && node scripts/e2e.mjs",
-    "test:a11y": "playwright test"
+    "test:browser": "playwright test"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.11.3",

@@ -41,7 +41,15 @@ interface AppState {
   vrf: {
     keyPair: VRFKeyPair | null;
     output: VRFOutput | null;
+    /**
+     * The exact α string the β/π/math readouts on screen were computed for. Editing α
+     * without recomputing used to leave those values sitting under the new input, so the
+     * page presented a β as the output for an α it had never been given.
+     */
+    outputAlpha: string | null;
     uniquenessRuns: string[];
+    /** The α the five uniqueness runs were made over, so the verdict can retire when α moves. */
+    uniquenessAlpha: string | null;
     comparison: { current: string; changed: string } | null;
     /** True once the learner types their own comparison α′, so it stops auto-deriving. */
     comparisonEdited: boolean;
@@ -56,7 +64,7 @@ interface AppState {
      * different Fiat-Shamir prime and print "INVALID" over a perfectly good proof.
      */
     resultParams: VDFParams | null;
-    shortcut: { y: bigint; timeMs: number; T: number } | null;
+    shortcut: { g: bigint; y: bigint; timeMs: number; T: number } | null;
     verifyMs: number | null;
     progress: number;
     squarings: number;
@@ -129,11 +137,21 @@ const deploymentCards = [
   },
 ];
 
+const VRF_VERIFY_IDLE = 'Verification status is waiting for a proof.';
+const VRF_VERIFY_RETIRED =
+  'Inputs changed — nothing has been checked against them yet. Press Verify.';
+const VRF_UNIQUENESS_IDLE = 'Run the deterministic check to compare five proofs.';
+const VRF_COMPARE_IDLE = 'Compute the VRF to compare β for α and for your α′.';
+const BEACON_IDLE_SUMMARY =
+  'Run a beacon round to see how withholding changes the RANDAO mix, and where a VDF of unknown order would sit in the pipeline to block selective prediction. Note that this page\'s toy VDF does not block it — its modulus has published factors, so the delay is zero. Exhibit 2\'s "Skip the delay" button demonstrates that.';
+
 const appState: AppState = {
   vrf: {
     keyPair: null,
     output: null,
+    outputAlpha: null,
     uniquenessRuns: [],
+    uniquenessAlpha: null,
     comparison: null,
     comparisonEdited: false,
   },
@@ -154,7 +172,7 @@ const appState: AppState = {
     logLines: [],
     progress: 0,
     squarings: 0,
-    summary: 'Run a beacon round to see how withholding changes the RANDAO mix, and where a VDF of unknown order would sit in the pipeline to block selective prediction. Note that this page\'s toy VDF does not block it — its modulus has published factors, so the delay is zero. Exhibit 2\'s "Skip the delay" button demonstrates that.',
+    summary: BEACON_IDLE_SUMMARY,
   },
 };
 
@@ -398,11 +416,11 @@ function renderApp(): void {
             <div class="property-grid">
               <article class="property-card">
                 <h3>Uniqueness</h3>
-                <p id="vrf-uniqueness-result">Run the deterministic check to compare five proofs.</p>
+                <p id="vrf-uniqueness-result">${VRF_UNIQUENESS_IDLE}</p>
               </article>
               <article class="property-card">
                 <h3>Pseudorandomness</h3>
-                <p id="vrf-compare-result">Compute the VRF to compare β for α and for your α′.</p>
+                <p id="vrf-compare-result">${VRF_COMPARE_IDLE}</p>
               </article>
             </div>
           </article>
@@ -428,7 +446,7 @@ function renderApp(): void {
               <button id="vrf-verify" type="button">Verify</button>
               <button id="vrf-tamper" class="ghost-button" type="button">Tamper with β</button>
             </div>
-            <p id="vrf-verify-status" class="status-pill" data-tone="neutral" role="status" aria-live="polite">Verification status is waiting for a proof.</p>
+            <p id="vrf-verify-status" class="status-pill" data-tone="neutral" role="status" aria-live="polite">${VRF_VERIFY_IDLE}</p>
           </article>
         </div>
       </section>
@@ -870,10 +888,21 @@ async function populateVrfForAlpha(alphaText: string): Promise<void> {
   const changedOutput = await vrfProve(keyPair, comparisonAlpha);
 
   appState.vrf.output = output;
+  appState.vrf.outputAlpha = alphaText;
   appState.vrf.comparison = {
     current: shortHex(output.beta),
     changed: shortHex(changedOutput.beta),
   };
+
+  // The five uniqueness runs were made over whatever α was current when the button was
+  // pressed. Recomputing for a different α leaves that card quoting β prefixes that no
+  // longer match the β printed right above it, so retire it rather than let it endorse a
+  // determinism check it never ran for this input.
+  if (appState.vrf.uniquenessAlpha !== null && appState.vrf.uniquenessAlpha !== alphaText) {
+    appState.vrf.uniquenessAlpha = null;
+    appState.vrf.uniquenessRuns = [];
+    requireElement<HTMLElement>('#vrf-uniqueness-result').textContent = VRF_UNIQUENESS_IDLE;
+  }
 
   requireElement<HTMLElement>('#vrf-public-key').textContent = bytesToHex(keyPair.publicKeyBytes);
   requireElement<HTMLElement>('#vrf-beta').textContent = bytesToHex(output.beta);
@@ -896,7 +925,55 @@ async function populateVrfForAlpha(alphaText: string): Promise<void> {
       : `${differingBytes} of ${output.beta.length} β bytes differ. Nothing about how close α and α′ are is visible in the outputs.`;
   requireElement<HTMLElement>('#vrf-compare-result').textContent =
     `α = "${alphaText}" -> β = ${shortHex(output.beta)}; α′ = "${comparisonText}" -> β = ${shortHex(changedOutput.beta)}. ${verdict}`;
-  setStatus(requireElement<HTMLElement>('#vrf-verify-status'), 'Verification status is waiting for a proof.', 'neutral');
+  setStatus(requireElement<HTMLElement>('#vrf-verify-status'), VRF_VERIFY_IDLE, 'neutral');
+}
+
+/**
+ * Blank the producer readouts when α no longer matches the α they were computed for.
+ * β, π and every "See the math" intermediate are claims about one specific input; leaving
+ * them painted under an edited α asserts an output the page was never asked to produce.
+ */
+function retireVrfProducerReadout(): void {
+  appState.vrf.output = null;
+  appState.vrf.outputAlpha = null;
+  appState.vrf.uniquenessAlpha = null;
+  appState.vrf.uniquenessRuns = [];
+  appState.vrf.comparison = null;
+
+  for (const selector of [
+    '#vrf-beta',
+    '#vrf-math-h',
+    '#vrf-math-gamma',
+    '#vrf-math-u',
+    '#vrf-math-v',
+    '#vrf-math-c',
+    '#vrf-math-s',
+    '#vrf-math-beta',
+  ]) {
+    requireElement<HTMLElement>(selector).textContent = '—';
+  }
+
+  requireElement<HTMLElement>('#vrf-proof').textContent = '—';
+  requireElement<HTMLElement>('#vrf-math-h-ctr').textContent = '';
+  requireElement<HTMLElement>('#vrf-uniqueness-result').textContent = VRF_UNIQUENESS_IDLE;
+  requireElement<HTMLElement>('#vrf-compare-result').textContent =
+    'α changed — press “Compute VRF Output” to compare β for this α against your α′.';
+}
+
+/**
+ * Retire the verifier verdict whenever the triple under it moves. A verdict is about the
+ * exact (α, β, π) that was checked; "Tamper with β" rewrote β in place and left a green
+ * "✓ VALID — β is the unique VRF output" standing over the tampered bytes until the learner
+ * happened to press Verify again.
+ */
+function retireVrfVerdict(): void {
+  const status = requireElement<HTMLElement>('#vrf-verify-status');
+
+  if (status.dataset.tone === 'neutral') {
+    return;
+  }
+
+  setStatus(status, VRF_VERIFY_RETIRED, 'neutral');
 }
 
 async function runVrfUniquenessDemo(): Promise<void> {
@@ -937,6 +1014,7 @@ async function runVrfUniquenessDemo(): Promise<void> {
       ? `all 5 runs returned byte-identical β and π (all ${runs[0].beta.length} bytes of β compared, not just the prefix shown), all 5 verified, and a β with one bit flipped was rejected`
       : `CHECK FAILED — β agree: ${allBetasAgree}, π agree: ${allProofsAgree}, verified: ${acceptedCount}/${runs.length}, rival β accepted: ${rivalAccepted}. Treat this page as broken.`;
 
+  appState.vrf.uniquenessAlpha = alphaText;
   requireElement<HTMLElement>('#vrf-uniqueness-result').textContent =
     `${appState.vrf.uniquenessRuns.join(' • ')} — ${verdict}.`;
 }
@@ -963,11 +1041,19 @@ async function verifyCurrentVrf(): Promise<void> {
       return;
     }
 
-    setStatus(requireElement<HTMLElement>('#vrf-verify-status'), '✗ INVALID — the proof or beta has been modified.', 'bad');
+    // Say what the check established, not what caused it. A failed ECVRF verification means
+    // this (α, β, π) does not satisfy the equations under this public key — which a modified
+    // β, a modified π, or simply the wrong α all produce. The verifier cannot tell them apart,
+    // so it must not name one.
+    setStatus(
+      requireElement<HTMLElement>('#vrf-verify-status'),
+      '✗ INVALID — this β and π do not verify under this public key for this input α.',
+      'bad',
+    );
   } catch (error) {
     setStatus(
       requireElement<HTMLElement>('#vrf-verify-status'),
-      `✗ INVALID — ${(error as Error).message}`,
+      `✗ INVALID — the proof could not even be parsed: ${(error as Error).message}`,
       'bad',
     );
   }
@@ -976,17 +1062,47 @@ async function verifyCurrentVrf(): Promise<void> {
 async function refreshVdfDerivedState(): Promise<void> {
   const inputElement = requireElement<HTMLTextAreaElement>('#vdf-input');
   const params = currentVdfParams();
-  const inputBytes = hexToBytes(inputElement.value);
-  const groupElement = await hashToGroup(inputBytes, params.N);
 
-  appState.vdf.inputHex = inputElement.value;
-  appState.vdf.groupElement = groupElement;
   requireElement<HTMLElement>('#vdf-modulus').textContent = shortHex(params.N, 20);
-  requireElement<HTMLElement>('#vdf-group').textContent = shortHex(groupElement, 20);
   requireElement<HTMLElement>('#vdf-exp-label').textContent = `2^${params.T_exp} = ${params.T.toLocaleString()} squarings`;
   requireElement<HTMLElement>('#vdf-math-t').textContent = `2^${params.T_exp}`;
+  appState.vdf.inputHex = inputElement.value;
+
+  let inputBytes: Uint8Array;
+
+  try {
+    inputBytes = hexToBytes(inputElement.value);
+  } catch {
+    // g = H(x) mod N is a claim about the x in the box. When x stops being hex there is no
+    // such g, and the previous one must come down rather than sit under an input it was
+    // never derived from. This used to throw straight out of the change listener, which had
+    // no catch: the page logged an unhandled rejection and kept the stale g on screen.
+    appState.vdf.groupElement = null;
+    requireElement<HTMLElement>('#vdf-group').textContent = '—';
+    renderVdfScaling();
+    throw new Error(
+      'Input x is not valid hex, so g = H(x) mod N has no value here. Nothing was evaluated.',
+    );
+  }
+
+  const groupElement = await hashToGroup(inputBytes, params.N);
+
+  appState.vdf.groupElement = groupElement;
+  requireElement<HTMLElement>('#vdf-group').textContent = shortHex(groupElement, 20);
 
   renderVdfScaling();
+}
+
+/**
+ * Refresh derived state from a control listener, where there is no surrounding try/catch and
+ * an unhandled rejection would otherwise be the only sign that x is unusable.
+ */
+async function syncVdfDerivedState(): Promise<void> {
+  try {
+    await refreshVdfDerivedState();
+  } catch (error) {
+    setStatus(requireElement<HTMLElement>('#vdf-verify-status'), (error as Error).message, 'bad');
+  }
 }
 
 /**
@@ -1071,6 +1187,9 @@ async function runVdfDemo(): Promise<void> {
     requireElement<HTMLElement>('#vdf-speedup').textContent =
       `Evaluation took ${evaluation.timeMs.toFixed(0)}ms for ${evaluation.squarings.toLocaleString()} sequential squarings.`;
     renderVdfScaling();
+    // If the learner skipped the delay first, the shortcut panel can now state the equality
+    // it was waiting for instead of still asking for a chain that has just been run.
+    renderVdfShortcutStatus();
   } catch (error) {
     setStatus(requireElement<HTMLElement>('#vdf-verify-status'), (error as Error).message, 'bad');
   } finally {
@@ -1138,37 +1257,58 @@ async function runVdfShortcut(): Promise<void> {
       throw new Error('The λ shortcut does not apply to these parameters — nothing was skipped.');
     }
 
-    appState.vdf.shortcut = { y: shortcut.y, timeMs: shortcut.timeMs, T: params.T };
+    appState.vdf.shortcut = {
+      g: appState.vdf.groupElement,
+      y: shortcut.y,
+      timeMs: shortcut.timeMs,
+      T: params.T,
+    };
     requireElement<HTMLElement>('#vdf-skip-exponent').textContent = shortHex(shortcut.exponent, 24);
-
-    const chain = appState.vdf.result;
-    const comparable = chain !== null && chain.input === appState.vdf.groupElement && chain.steps === params.T;
-    const headline =
-      `y = ${shortHex(shortcut.y, 24)} in ${shortcut.timeMs.toFixed(2)}ms — one modular exponentiation, ` +
-      `zero squarings. λ(N) = lcm(p − 1, n − 1) is public, so the exponent reduces to 2^T mod λ(N) ` +
-      `and this cost is the same at every T the slider offers.`;
-
-    if (!comparable) {
-      setStatus(
-        status,
-        `${headline} Press “Evaluate VDF” with this same input and T to watch the ${params.T.toLocaleString()}-squaring chain arrive at the identical value.`,
-        'warn',
-      );
-      return;
-    }
-
-    setStatus(
-      status,
-      chain.output === shortcut.y
-        ? `${headline} Byte-identical to the ${chain.steps.toLocaleString()}-squaring chain, which took ${chain.timeMs.toFixed(0)}ms. That is what “the delay is zero, not merely short” means.`
-        : `${headline} It does NOT match the chain's output, which should be impossible — treat this page as broken.`,
-      chain.output === shortcut.y ? 'warn' : 'bad',
-    );
+    renderVdfShortcutStatus();
   } catch (error) {
     setStatus(status, (error as Error).message, 'bad');
   } finally {
     skipButton.disabled = false;
   }
+}
+
+/**
+ * Describe the shortcut against the squaring chain whenever both exist for the same (g, T),
+ * regardless of which button was pressed first. Pressing "Skip" before "Evaluate" used to
+ * leave the panel permanently telling you to press Evaluate — an instruction that outlived
+ * being followed, and, worse, withheld the equality that is the whole point of the exhibit.
+ */
+function renderVdfShortcutStatus(): void {
+  const shortcut = appState.vdf.shortcut;
+
+  if (!shortcut) {
+    return;
+  }
+
+  const status = requireElement<HTMLElement>('#vdf-skip-status');
+  const chain = appState.vdf.result;
+  const comparable = chain !== null && chain.input === shortcut.g && chain.steps === shortcut.T;
+  const headline =
+    `y = ${shortHex(shortcut.y, 24)} in ${shortcut.timeMs.toFixed(2)}ms — one modular exponentiation, ` +
+    `zero squarings. λ(N) = lcm(p − 1, n − 1) is public, so the exponent reduces to 2^T mod λ(N) ` +
+    `and this cost is the same at every T the slider offers.`;
+
+  if (!comparable || chain === null) {
+    setStatus(
+      status,
+      `${headline} Press “Evaluate VDF” with this same input and T to watch the ${shortcut.T.toLocaleString()}-squaring chain arrive at the identical value.`,
+      'warn',
+    );
+    return;
+  }
+
+  setStatus(
+    status,
+    chain.output === shortcut.y
+      ? `${headline} Byte-identical to the ${chain.steps.toLocaleString()}-squaring chain, which took ${chain.timeMs.toFixed(0)}ms. That is what “the delay is zero, not merely short” means.`
+      : `${headline} It does NOT match the chain's output, which should be impossible — treat this page as broken.`,
+    chain.output === shortcut.y ? 'warn' : 'bad',
+  );
 }
 
 async function verifyCurrentVdf(): Promise<void> {
@@ -1319,12 +1459,42 @@ async function runBeaconDemo(): Promise<void> {
   }
 }
 
+/**
+ * Drop a finished beacon round when the controls that produced it move. The log names each
+ * validator "honest" or "malicious" and the summary states whether residual bias remains —
+ * both are facts about one specific validator count, delay and withholding setting. Changing
+ * any of them left the previous round's narration on screen describing a configuration the
+ * page was no longer set to.
+ */
+function retireBeaconRound(): void {
+  if (appState.beacon.round === null) {
+    return;
+  }
+
+  appState.beacon.round = null;
+  appState.beacon.logLines = [];
+  appState.beacon.summary = BEACON_IDLE_SUMMARY;
+  writeBeaconLog(['Controls changed — run the round again to see a beacon for these settings.']);
+  requireElement<HTMLElement>('#beacon-summary').textContent = BEACON_IDLE_SUMMARY;
+  updateBeaconProgress(0, 0);
+}
+
 function bindControls(): void {
   requireElement<HTMLButtonElement>('#vrf-compute').addEventListener('click', async () => {
     await populateVrfForAlpha(requireElement<HTMLInputElement>('#vrf-alpha').value);
   });
+  requireElement<HTMLInputElement>('#vrf-alpha').addEventListener('input', (event) => {
+    if ((event.currentTarget as HTMLInputElement).value !== appState.vrf.outputAlpha) {
+      retireVrfProducerReadout();
+    }
+  });
   requireElement<HTMLInputElement>('#vrf-alpha-compare').addEventListener('input', () => {
     appState.vrf.comparisonEdited = true;
+
+    if (appState.vrf.output !== null) {
+      requireElement<HTMLElement>('#vrf-compare-result').textContent =
+        'α′ changed — press “Compute VRF Output” to compare β for α against this α′.';
+    }
   });
   requireElement<HTMLInputElement>('#vrf-alpha-compare').addEventListener('change', async () => {
     await populateVrfForAlpha(requireElement<HTMLInputElement>('#vrf-alpha').value);
@@ -1345,18 +1515,29 @@ function bindControls(): void {
     } catch {
       betaField.value = '00';
     }
+
+    // Setting .value from script fires no input event, so this has to be explicit.
+    retireVrfVerdict();
   });
-  requireElement<HTMLTextAreaElement>('#vdf-input').addEventListener('change', async () => {
+
+  for (const selector of ['#vrf-verify-alpha', '#vrf-verify-beta', '#vrf-verify-proof']) {
+    requireElement<HTMLElement>(selector).addEventListener('input', retireVrfVerdict);
+  }
+  // Bound to `input` as well as `change`: g, y, ℓ and π are all claims about the x in the
+  // box, and waiting for blur left them describing an x that had already been typed over.
+  const onVdfInput = async (): Promise<void> => {
     resetVdfShortcutReadout();
     clearVdfResultReadout();
-    await refreshVdfDerivedState();
-  });
+    await syncVdfDerivedState();
+  };
+  requireElement<HTMLTextAreaElement>('#vdf-input').addEventListener('input', onVdfInput);
+  requireElement<HTMLTextAreaElement>('#vdf-input').addEventListener('change', onVdfInput);
   requireElement<HTMLInputElement>('#vdf-exp').addEventListener('input', async (event) => {
     const value = Number((event.currentTarget as HTMLInputElement).value);
     requireElement<HTMLElement>('#vdf-exp-label').textContent = `2^${value} = ${(1 << value).toLocaleString()} squarings`;
     resetVdfShortcutReadout();
     clearVdfResultReadout();
-    await refreshVdfDerivedState();
+    await syncVdfDerivedState();
   });
   requireElement<HTMLButtonElement>('#vdf-evaluate').addEventListener('click', async () => {
     await runVdfDemo();
@@ -1370,10 +1551,15 @@ function bindControls(): void {
   requireElement<HTMLInputElement>('#beacon-validators').addEventListener('input', (event) => {
     const count = Number((event.currentTarget as HTMLInputElement).value);
     requireElement<HTMLElement>('#beacon-validators-label').textContent = `${count} validators`;
+    retireBeaconRound();
   });
   requireElement<HTMLInputElement>('#beacon-exp').addEventListener('input', (event) => {
     const value = Number((event.currentTarget as HTMLInputElement).value);
     requireElement<HTMLElement>('#beacon-exp-label').textContent = `2^${value} squarings`;
+    retireBeaconRound();
+  });
+  requireElement<HTMLInputElement>('#beacon-malicious').addEventListener('change', () => {
+    retireBeaconRound();
   });
   requireElement<HTMLButtonElement>('#beacon-run').addEventListener('click', async () => {
     await runBeaconDemo();
