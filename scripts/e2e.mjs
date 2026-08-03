@@ -6,7 +6,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { chromium } from 'playwright';
 import { AxeBuilder } from '@axe-core/playwright';
 
-const PORT = 4173;
+const PORT = 4709;
 const URL = process.env.E2E_URL ?? `http://localhost:${PORT}/crypto-lab-vrf-gate/`;
 
 let server;
