@@ -16,10 +16,24 @@
   --text: #f5f7fb;
   --text-soft: rgba(245, 247, 251, 0.78);
   --text-muted: rgba(245, 247, 251, 0.68);
+  /* Recessed surfaces — code readouts, the beacon log, the math disclosures.
+     These were literal rgba(0,0,0,.18)/.12 applied in both themes, which is a
+     dark-theme value: over the light theme's parchment panels it composited to
+     a mid-grey #d0cec8 slab, and every accent ink printed on it was measured
+     between 1.1:1 and 2:1. Tokenised so the light theme can recess by darkening
+     its own ink rather than by painting a hole. */
+  --inset: rgba(0, 0, 0, 0.18);
+  --inset-soft: rgba(0, 0, 0, 0.12);
   --cyan: #00d4ff;
   --magenta: #ff00ff;
   --green: #00ff88;
-  --red: #ff3366;
+  /* #ff3366 measured 4.42:1 against the bad-tone status pill's own tinted
+     surface (#252036 once rgba(255,51,102,.08) is composited over the card, the
+     panel and the magenta body wash) — under the 4.5:1 floor, on the pill that
+     announces every failed verification. Lightened along the same hue: 5.09:1.
+     That pill is the ONLY place --red paints text in this theme — see the note
+     on .attack-note, whose red never applies. */
+  --red: #ff5577;
   --amber: #ffaa00;
   --shadow: 0 28px 80px rgba(0, 0, 0, 0.3);
   color-scheme: dark;
@@ -44,6 +58,31 @@
   --text-soft: rgba(24, 34, 53, 0.82);
   --text-muted: rgba(24, 34, 53, 0.68);
   --shadow: 0 26px 60px rgba(53, 42, 21, 0.12);
+  /* Recess by tinting the parchment down slightly, not by punching a dark hole
+     in it. rgba(0,0,0,.18) composited to #d0cec8 here — a slab dark enough that
+     no accent hue could clear 4.5:1 on it without going almost black. */
+  --inset: rgba(24, 34, 53, 0.06);
+  --inset-soft: rgba(24, 34, 53, 0.04);
+  /* The five accent inks were never given light-theme values, so the whole
+     palette was being painted at its dark-theme brightness on near-white
+     parchment: #00d4ff pane labels and glossary terms at 1.71:1, #00ff88
+     verification verdicts at 1.25:1, #ff00ff proof bytes at 1.99:1, #ffaa00
+     warnings at 1.73:1, #ff3366 failures at 3.10:1. axe never reported any of
+     it, because every surface on this page is translucent over a gradient and
+     axe files those under `incomplete` rather than measuring them.
+
+     Each is the same hue taken down its own lightness ramp until it clears
+     4.5:1 on the darkest surface it actually lands on in this theme — the
+     --inset code slab for cyan and magenta, the tinted status pills for green,
+     red and amber. Doing it here rather than per-rule also fixes the two
+     non-text cases: .amber-fill and .green-fill were 1.84:1 and 1.29:1 against
+     their own progress tracks, which is a 1.4.11 failure no oracle here
+     checks. */
+  --cyan: #00666f;
+  --magenta: #a3009f;
+  --green: #0a7a45;
+  --red: #b3002f;
+  --amber: #7a5200;
   color-scheme: light;
 }
 
@@ -237,6 +276,10 @@ footer {
   text-transform: uppercase;
 }
 
+/* Of these three selectors only `.pane-label` actually takes --cyan. `.kicker`
+   appears nowhere in the markup, and `.section-index` is outranked by
+   `.section-heading p` below (0,0,2 vs 0,0,1), so the "Exhibit 1" indexes render
+   in --text-soft — 10.24:1 in dark, 8.71:1 in light. */
 .kicker,
 .section-index,
 .pane-label {
@@ -488,6 +531,22 @@ footer {
   border: 1px solid var(--line);
 }
 
+/* Every one of these paragraphs is written at runtime with a `shortHex` value
+   spliced into it, and a shortHex is an unbreakable 27- or 51-character token.
+   Without this, `#vdf-skip-status` — which prints `y = <51 chars> in 0.29ms …`
+   after the λ shortcut runs — set a 445px min-content floor that propagated up
+   through .metric-grid, .pane-card and .split-pane and pushed the whole
+   document to 544px inside a 380px viewport. That is a WCAG 1.4.10 reflow
+   failure, and axe has no rule for it. `anywhere` rather than `break-word`
+   deliberately: only `anywhere` reduces the intrinsic min-content size, which
+   is the thing that was sizing the grid track. */
+.status-pill,
+.summary-copy,
+.beacon-log p,
+.property-card p {
+  overflow-wrap: anywhere;
+}
+
 .warning-banner {
   color: var(--amber);
   background: rgba(255, 170, 0, 0.1);
@@ -583,7 +642,7 @@ footer {
   padding: 0.95rem 1rem;
   border-radius: 18px;
   border: 1px solid rgba(255, 255, 255, 0.06);
-  background: rgba(0, 0, 0, 0.18);
+  background: var(--inset);
   color: var(--text);
   overflow-wrap: anywhere;
 }
@@ -646,6 +705,12 @@ footer {
   margin-top: 0;
 }
 
+/* NOTE: this declaration never applies. `.attempt-card p` above (specificity
+   0,0,2) sets --text-soft and outranks `.attack-note` (0,0,1), so every "Attack:"
+   line renders in the same ink as the paragraph above it — measured
+   rgba(245,247,251,0.78) in dark and rgba(24,34,53,0.82) in light. Left as-is
+   rather than "fixed", because promoting it is a visual decision, not an
+   accessibility one; recorded so nobody mistakes this rule for live colour. */
 .attack-note {
   color: var(--red);
 }
@@ -672,7 +737,7 @@ footer {
   gap: 0.7rem;
   padding: 1rem;
   border-radius: 20px;
-  background: rgba(0, 0, 0, 0.18);
+  background: var(--inset);
 }
 
 .beacon-log p {
@@ -786,7 +851,7 @@ footer p {
 .math-reveal {
   border: 1px solid var(--line);
   border-radius: 20px;
-  background: rgba(0, 0, 0, 0.12);
+  background: var(--inset-soft);
   padding: 0 1rem;
 }
 

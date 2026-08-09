@@ -250,6 +250,19 @@ function currentVdfParams(explicitExp?: number): VDFParams {
   };
 }
 
+/**
+ * Build the whole page.
+ *
+ * Every `<code>` and `<pre>` readout below is labelled by the visible
+ * `.strip-label` / `.math-step-label` beside it and carries NO `aria-label`.
+ * Seventeen of them used to. `aria-label` is prohibited on `code` and `pre` —
+ * neither role supports an accessible name — so the browser discarded all
+ * seventeen, and axe files that under `incomplete`, where a gate asserting only
+ * on `violations` never sees it. Re-adding them "properly" would be worse than
+ * dropping them: an accessible name REPLACES the announced content, so a screen
+ * reader would hear "VRF output beta" instead of the 64 hex characters that are
+ * the entire point of the element.
+ */
 function renderApp(): void {
   app.innerHTML = `
     <main class="page-shell" id="main-content" tabindex="-1" aria-label="VRF and VDF crypto lab">
@@ -354,7 +367,7 @@ function renderApp(): void {
               </div>
               <div>
                 <span class="strip-label">Public key</span>
-                <code id="vrf-public-key" class="proof-bytes" aria-label="VRF public key bytes">loading...</code>
+                <code id="vrf-public-key" class="proof-bytes">loading...</code>
               </div>
             </div>
             <div class="button-row">
@@ -364,11 +377,11 @@ function renderApp(): void {
             <div class="result-panel">
               <div>
                 <span class="strip-label">Output β</span>
-                <code id="vrf-beta" class="proof-bytes beta-text" aria-label="VRF output beta">—</code>
+                <code id="vrf-beta" class="proof-bytes beta-text">—</code>
               </div>
               <div>
                 <span class="strip-label">Proof π</span>
-                <pre id="vrf-proof" class="proof-box proof-text" aria-label="VRF proof bytes">—</pre>
+                <pre id="vrf-proof" class="proof-box proof-text">—</pre>
               </div>
             </div>
             <details class="math-reveal">
@@ -380,29 +393,29 @@ function renderApp(): void {
               <ol class="math-steps">
                 <li>
                   <span class="math-step-label">H = encode_to_curve(pk, α)</span>
-                  <code id="vrf-math-h" class="proof-bytes" aria-label="Curve point H">—</code>
+                  <code id="vrf-math-h" class="proof-bytes">—</code>
                   <span class="math-aside" id="vrf-math-h-ctr"></span>
                 </li>
                 <li>
                   <span class="math-step-label">Γ = x · H <span class="math-aside">(needs the secret key)</span></span>
-                  <code id="vrf-math-gamma" class="proof-bytes" aria-label="Gamma point">—</code>
+                  <code id="vrf-math-gamma" class="proof-bytes">—</code>
                 </li>
                 <li>
                   <span class="math-step-label">U = k · B and V = k · H <span class="math-aside">(k = deterministic RFC 6979 nonce)</span></span>
-                  <code id="vrf-math-u" class="proof-bytes" aria-label="U point">—</code>
-                  <code id="vrf-math-v" class="proof-bytes" aria-label="V point">—</code>
+                  <code id="vrf-math-u" class="proof-bytes">—</code>
+                  <code id="vrf-math-v" class="proof-bytes">—</code>
                 </li>
                 <li>
                   <span class="math-step-label">c = SHA-256(0x01‖0x02‖pk‖H‖Γ‖U‖V‖0x00) [first 16 bytes]</span>
-                  <code id="vrf-math-c" class="proof-bytes" aria-label="Challenge c">—</code>
+                  <code id="vrf-math-c" class="proof-bytes">—</code>
                 </li>
                 <li>
                   <span class="math-step-label">s = (k + c · x) mod n</span>
-                  <code id="vrf-math-s" class="proof-bytes" aria-label="Response s">—</code>
+                  <code id="vrf-math-s" class="proof-bytes">—</code>
                 </li>
                 <li>
                   <span class="math-step-label">β = SHA-256(0x01‖0x03‖Γ‖0x00)</span>
-                  <code id="vrf-math-beta" class="proof-bytes beta-text" aria-label="Output beta">—</code>
+                  <code id="vrf-math-beta" class="proof-bytes beta-text">—</code>
                 </li>
               </ol>
               <p class="tiny-note">
@@ -481,11 +494,11 @@ function renderApp(): void {
             <div class="metric-grid">
               <div class="metric-card">
                 <span class="strip-label">Toy modulus N</span>
-                <code id="vdf-modulus" class="proof-bytes" aria-label="Toy VDF modulus">—</code>
+                <code id="vdf-modulus" class="proof-bytes">—</code>
               </div>
               <div class="metric-card">
                 <span class="strip-label">g = H(x) mod N</span>
-                <code id="vdf-group" class="proof-bytes" aria-label="VDF group element">—</code>
+                <code id="vdf-group" class="proof-bytes">—</code>
               </div>
             </div>
             <div class="button-row">
@@ -500,7 +513,7 @@ function renderApp(): void {
             <div class="metric-grid">
               <div class="metric-card wide">
                 <span class="strip-label">2^T mod λ(N) — the exponent an adversary uses instead</span>
-                <code id="vdf-skip-exponent" class="proof-bytes" aria-label="Reduced VDF exponent">Skip the delay to populate the reduced exponent.</code>
+                <code id="vdf-skip-exponent" class="proof-bytes">Skip the delay to populate the reduced exponent.</code>
               </div>
             </div>
             <div class="progress-block">
@@ -532,15 +545,15 @@ function renderApp(): void {
             <div class="metric-grid">
               <div class="metric-card">
                 <span class="strip-label">Result y</span>
-                <code id="vdf-output" class="proof-bytes beta-text" aria-label="VDF output">—</code>
+                <code id="vdf-output" class="proof-bytes beta-text">—</code>
               </div>
               <div class="metric-card">
                 <span class="strip-label">Prime ℓ</span>
-                <code id="vdf-prime" class="proof-bytes proof-text" aria-label="VDF Wesolowski prime">—</code>
+                <code id="vdf-prime" class="proof-bytes proof-text">—</code>
               </div>
               <div class="metric-card wide">
                 <span class="strip-label">Proof π</span>
-                <code id="vdf-proof" class="proof-bytes proof-text" aria-label="VDF proof value">—</code>
+                <code id="vdf-proof" class="proof-bytes proof-text">—</code>
               </div>
             </div>
             <p id="vdf-verify-status" class="status-pill" data-tone="neutral" role="status" aria-live="polite">Evaluate the VDF to produce a proof bundle.</p>
@@ -576,7 +589,7 @@ function renderApp(): void {
               <div class="metric-grid">
                 <div class="metric-card">
                   <span class="strip-label">r = 2^T mod ℓ</span>
-                  <code id="vdf-math-r" class="proof-bytes" aria-label="Wesolowski remainder r">Verify a proof to populate r.</code>
+                  <code id="vdf-math-r" class="proof-bytes">Verify a proof to populate r.</code>
                 </div>
               </div>
               <p class="tiny-note">
@@ -701,9 +714,19 @@ The delay turns strategic choice into blind choice.</pre>
             )
             .join('')}
         </div>
-        <div class="comparison-wrap">
+        <!-- The table keeps a 420px floor, so below that it scrolls sideways rather
+             than crushing three prose columns. A scroller has to be operable from the
+             keyboard (WCAG 2.1.1) and this one holds nothing focusable, so it takes
+             tabindex="0" itself — and a named region, because an unnamed tab stop
+             announces nothing when you land on it. -->
+        <div
+          class="comparison-wrap"
+          tabindex="0"
+          role="region"
+          aria-labelledby="comparison-caption"
+        >
           <table class="comparison-table">
-            <caption class="sr-only">Comparison of VRF and VDF properties</caption>
+            <caption id="comparison-caption" class="sr-only">Comparison of VRF and VDF properties</caption>
             <thead>
               <tr>
                 <th scope="col">Property</th>
