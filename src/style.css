@@ -158,7 +158,12 @@ select {
 }
 
 button {
-  border: 1px solid transparent;
+  /* WCAG 1.4.11. `border: 1px solid transparent` left every button delineated by
+     its fill alone — a 0.18-alpha cyan/amber gradient that composites to 1.42:1
+     against the panel behind it, well under 3:1. --border-strong (#6e7793) is
+     the palette's own control token, already measured 3.39-4.26:1 on every
+     surface a control sits on, and until now applied only to text inputs. */
+  border: 1px solid var(--border-strong);
   border-radius: 999px;
   min-height: 44px;
   padding: 0.8rem 1.15rem;
@@ -171,7 +176,14 @@ button {
 
 button:hover {
   transform: translateY(-1px);
-  border-color: rgba(255, 255, 255, 0.16);
+  /* Hover must not WEAKEN the boundary. This was
+     `rgba(255, 255, 255, 0.16)`, which composites to 1.65:1 in dark and — on the
+     light theme's near-white surface — 1.00:1, i.e. invisible. A click leaves
+     the pointer on the button, so this is the state a visitor is actually in
+     right after pressing anything, and the gate caught it in "VDF verify pressed
+     before evaluating (refusal)". Hover feedback is carried by the transform and
+     the background; the boundary stays at the measured control token. */
+  border-color: var(--border-strong);
 }
 
 button:disabled {
@@ -182,7 +194,9 @@ button:disabled {
 
 .ghost-button {
   background: transparent;
-  border-color: var(--line);
+  /* No fill at all, so this border is the ENTIRE control boundary. --line is a
+     surface-divider token and composited to 1.36:1 here. */
+  border-color: var(--border-strong);
 }
 
 input,

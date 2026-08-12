@@ -45,7 +45,11 @@
   .cl-btn{
     display:inline-flex;align-items:center;gap:.4rem;
     padding:.5rem .85rem;border-radius:10px;
-    border:1px solid color-mix(in srgb, var(--accent, #35d6bb) 38%, transparent);
+    /* WCAG 1.4.11. Ghost buttons — the border is the whole control boundary,
+       and mixing the PAGE's --accent makes the ratio depend on each lab's
+       palette (2.45:1 here). --cl-ink is the header's own ink, already
+       required to be readable on the bar, so this is accent-independent. */
+    border:1px solid color-mix(in srgb, var(--cl-ink) 70%, transparent);
     background:transparent;color:var(--cl-ink);cursor:pointer;
     font:inherit;font-size:.78rem;font-weight:700;letter-spacing:.1em;
     text-transform:uppercase;text-decoration:none;transition:background .15s,border-color .15s,color .15s;
