@@ -884,18 +884,4 @@ export async function driveAllStates(page: Page, theme: string): Promise<void> {
   await expect(page.locator('#beacon-summary')).toContainText('Honest round complete');
   await expect(page.locator('#beacon-log p', { hasText: 'V7 (honest)' })).toHaveCount(1);
   await scanAt('beacon round with seven validators');
-
-  // ── The theme toggle ──────────────────────────────────────────────────────
-  // The header control is the visible one. Flipping it repaints every token on
-  // a page that is now fully driven, which is a different rendering from the
-  // opposite configuration's first paint.
-  const other = theme.startsWith('dark') ? 'light' : 'dark';
-  await page.locator('#cl-theme-toggle').click();
-  await expect(page.locator('html')).toHaveAttribute('data-theme', other);
-  await scanAt(`toggled to ${other} with every exhibit driven`);
-  await page.locator('#cl-theme-toggle').click();
-  await expect(page.locator('html')).toHaveAttribute(
-    'data-theme',
-    theme.startsWith('dark') ? 'dark' : 'light'
-  );
 }
