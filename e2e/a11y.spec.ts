@@ -1,5 +1,11 @@
 import { test } from '@playwright/test';
-import { boot, driveAllStates, NARROW, reportCollected } from './gate';
+import {
+  boot,
+  driveAllStates,
+  expectBaselineNotStale,
+  NARROW,
+  reportCollected,
+} from './gate';
 
 /**
  * WCAG A/AA regression gate.
@@ -27,6 +33,12 @@ for (const theme of ['dark', 'light'] as const) {
     await boot(page, theme);
     await driveAllStates(page, theme);
     reportCollected();
+    // The baseline ratchet's third rule. `nonTextSeen` is module state and
+    // `fullyParallel` gives every test its own worker, so each configuration
+    // accumulates its own set and a single call site would ratchet only one of
+    // the four. After `reportCollected()` so an `A11Y_COLLECT` run still throws
+    // there first.
+    expectBaselineNotStale();
   });
 
   test(`no WCAG A/AA violations in ${theme} theme at 380px`, async ({ page }) => {
@@ -35,5 +47,6 @@ for (const theme of ['dark', 'light'] as const) {
     await boot(page, theme);
     await driveAllStates(page, `${theme} @380px`);
     reportCollected();
+    expectBaselineNotStale();
   });
 }
