@@ -96,16 +96,10 @@ try {
   note((await page.locator('#vdf-verify-status').getAttribute('data-tone')) === 'good', 'VDF evaluate + verify works');
   note((await textOf(page, '#vdf-math-r')) !== '—', 'VDF Wesolowski r is shown');
 
-  // Accessibility — dark theme (default).
+  // Accessibility — dark, the only theme. The page pins it before first paint
+  // and the shared header carries no toggle, so there is no second palette.
   await runAxe(page, 'dark');
-
-  // Accessibility — light theme. The shared crypto-lab header hides the lab's
-  // own #theme-toggle and exposes its own #cl-theme-toggle; both drive the same
-  // documentElement[data-theme]. Click the visible header control.
-  await page.locator('#cl-theme-toggle').click();
-  await page.waitForFunction(() => document.documentElement.getAttribute('data-theme') === 'light', { timeout: 5000 });
-  note(true, 'theme toggle switches to light');
-  await runAxe(page, 'light');
+  note((await page.locator('#cl-theme-toggle').count()) === 0, 'no theme toggle is shipped');
 
   // Mobile viewport sanity: no horizontal overflow.
   await page.setViewportSize({ width: 360, height: 740 });
