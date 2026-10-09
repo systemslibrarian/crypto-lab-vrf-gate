@@ -5,8 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
-    "deploy": "npm run build && gh-pages -d dist",
+    "build": "npm run test:publish-request && tsc --noEmit && vite build",
+    "deploy": "gh workflow run deploy.yml --repo systemslibrarian/crypto-lab-vrf-gate --ref main",
     "preview": "vite preview",
     "check:phase1": "tsc -p tsconfig.scripts.json && node --experimental-specifier-resolution=node .tmp-checks/scripts/check-phase1.js",
     "check:phase2": "tsc -p tsconfig.scripts.json && node --experimental-specifier-resolution=node .tmp-checks/scripts/check-phase2.js",
@@ -14,13 +14,13 @@
     "check:rfc9381": "tsc -p tsconfig.scripts.json && node --experimental-specifier-resolution=node .tmp-checks/scripts/check-rfc9381.js",
     "check": "npm run check:phase1 && npm run check:phase2 && npm run check:phase3 && npm run check:rfc9381",
     "e2e": "npm run build && node scripts/e2e.mjs",
-    "test:browser": "playwright test"
+    "test:browser": "playwright test",
+    "test:publish-request": "node --test tests/publish-request.node.mjs"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.12.1",
     "@playwright/test": "^1.63.0",
     "@types/node": "^26.6.4",
-    "gh-pages": "^6.3.0",
     "playwright": "^1.61.1",
     "typescript": "^7.0.2",
     "vite": "^8.3.2"
