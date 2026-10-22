@@ -3,8 +3,8 @@ import {
   vrfProveScalar,
   vrfVerify,
 } from '../src/ecvrf.js';
-import { bytesToHex, concatBytes, hexToBytes, utf8ToBytes } from '../src/utils/bytes.js';
-import { compressPoint, P256_G, scalarMultiply } from '../src/utils/p256.js';
+import { bigintToBytes, bytesToBigInt, bytesToHex, concatBytes, hexToBytes, utf8ToBytes } from '../src/utils/bytes.js';
+import { compressPoint, P256_G, P256_N, scalarMultiply } from '../src/utils/p256.js';
 
 /**
  * RFC 9381 Appendix B.1, ECVRF-P256-SHA256-TAI, Example 10 (alpha = "sample").
@@ -75,6 +75,21 @@ async function main(): Promise<void> {
   const tamperedResult = await vrfVerify(publicKeyBytes, alpha, tampered);
   assert(!tamperedResult.valid, 'vrfVerify accepted a tampered beta');
   console.log('  ok  vrfVerify rejects a tampered beta');
+
+  // RFC 9381 Section 5.4.4 requires a qLen-byte response and rejects s >= q.
+  // scalar multiplication reduces modulo q, so this non-canonical response used
+  // to verify as the same proof unless the decoder enforced both requirements.
+  const nonCanonical = {
+    ...output,
+    proof: {
+      ...output.proof,
+      s: bigintToBytes(bytesToBigInt(output.proof.s) + P256_N),
+    },
+  };
+  assert(nonCanonical.proof.s.length === 33, 'Expected s + q to require a non-canonical 33-byte encoding');
+  const nonCanonicalResult = await vrfVerify(publicKeyBytes, alpha, nonCanonical);
+  assert(!nonCanonicalResult.valid, 'vrfVerify accepted a non-canonical s + q response');
+  console.log('  ok  vrfVerify rejects a non-canonical s + q response');
 
   console.log('rfc-9381 known-answer test passed (ECVRF-P256-SHA256-TAI, Example 10)');
 }

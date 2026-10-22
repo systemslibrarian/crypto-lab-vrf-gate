@@ -241,10 +241,27 @@ export async function vdfVerify(
   proof: bigint,
   params: VDFParams,
 ): Promise<boolean> {
+  // The proof API represents encoded group elements as bigint values. Accept only
+  // canonical residues; otherwise proof + kN verifies identically after modPow's
+  // implicit reduction and gives one proof many accepted encodings.
+  if (
+    params.N <= 1n ||
+    !Number.isSafeInteger(params.T) ||
+    params.T < 0 ||
+    g < 0n ||
+    g >= params.N ||
+    y < 0n ||
+    y >= params.N ||
+    proof < 0n ||
+    proof >= params.N
+  ) {
+    return false;
+  }
+
   const prime = await hashToPrime(g, y, params.T);
   const remainder = powerOfTwoMod(params.T, prime);
   const left = mod(modPow(proof, prime, params.N) * modPow(g, remainder, params.N), params.N);
-  return left === mod(y, params.N);
+  return left === y;
 }
 
 export const TOY_PARAMS: VDFParams = {

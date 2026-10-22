@@ -301,11 +301,23 @@ export async function vrfVerify(
   output: Pick<VRFOutput, 'beta' | 'proof'>,
 ): Promise<{ valid: boolean; beta?: Uint8Array }> {
   try {
+    // RFC 9381 Section 5.4.4 decodes one fixed-width proof: c is cLen bytes,
+    // s is qLen bytes, and s must be strictly below the group order. Without
+    // these checks scalarMultiply reduced an oversized s modulo q, so the same
+    // proof could be accepted with a non-canonical 33-byte (s + q) response.
+    if (output.proof.c.length !== CHALLENGE_LENGTH || output.proof.s.length !== SCALAR_LENGTH) {
+      return { valid: false };
+    }
+
     const publicKeyPoint = decompressPoint(publicKeyBytes);
     const { point: hPoint } = await encodeToCurveTAI(publicKeyBytes, alpha);
     const gammaPoint = decompressPoint(output.proof.gamma);
     const challengeScalar = bytesToBigInt(output.proof.c);
     const sScalar = bytesToBigInt(output.proof.s);
+
+    if (sScalar >= P256_N) {
+      return { valid: false };
+    }
 
     const cY = scalarMultiply(challengeScalar, publicKeyPoint);
     const uPoint = requirePoint(
