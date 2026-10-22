@@ -19,6 +19,14 @@ async function main(): Promise<void> {
   const verified = await vdfVerify(g, evaluation.y, proofBundle.proof, { ...TOY_PARAMS, T: 1 << 12, T_exp: 12 });
   assert(verified, 'Expected VDF proof verification to pass');
 
+  const nonCanonicalProof = await vdfVerify(
+    g,
+    evaluation.y,
+    proofBundle.proof + TOY_PARAMS.N,
+    { ...TOY_PARAMS, T: 1 << 12, T_exp: 12 },
+  );
+  assert(!nonCanonicalProof, 'Expected a non-canonical proof + N encoding to fail verification');
+
   const tampered = await vdfVerify(g, evaluation.y ^ 1n, proofBundle.proof, { ...TOY_PARAMS, T: 1 << 12, T_exp: 12 });
   assert(!tampered, 'Expected modified VDF output to fail verification');
 
