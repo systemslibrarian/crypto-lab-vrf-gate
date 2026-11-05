@@ -813,15 +813,59 @@ test('changing beacon controls during a round prevents stale completion from rep
   errors,
 }) => {
   void errors;
+
+  // Count SHA-256 calls from inside the page. Every stage of a beacon round awaits one,
+  // so "no digest in flight and none started recently" is the round having stopped —
+  // which is the only way to assert that a SUPERSEDED round did not repaint. Waiting for
+  // #beacon-run to be enabled cannot do it: the retirement itself re-enables that button
+  // immediately, so the assertions used to run while the old round was still going and
+  // passed whether or not it repainted afterwards. Measured: with every
+  // `revision !== beaconRevision` check neutered, that version of this test still passed
+  // in 1.4 s.
+  await page.addInitScript(() => {
+    const real = crypto.subtle.digest.bind(crypto.subtle);
+    const control = window as unknown as { __digestStarted: number; __digestInFlight: number };
+    control.__digestStarted = 0;
+    control.__digestInFlight = 0;
+    Object.defineProperty(crypto.subtle, 'digest', {
+      configurable: true,
+      value: async (algorithm: AlgorithmIdentifier, data: BufferSource) => {
+        control.__digestStarted += 1;
+        control.__digestInFlight += 1;
+        try {
+          return await real(algorithm, data);
+        } finally {
+          control.__digestInFlight -= 1;
+        }
+      },
+    });
+  });
   await open(page);
 
   await page.locator('#beacon-run').click();
   await page.locator('#beacon-malicious').uncheck();
-  await expect(page.locator('#beacon-run')).toBeEnabled({ timeout: 60_000 });
+
+  // Drain: wait until nothing is hashing and nothing new has started for 300 ms.
+  const quiet = async (): Promise<boolean> => {
+    const before = await page.evaluate(
+      () => (window as unknown as { __digestStarted: number }).__digestStarted,
+    );
+    await page.waitForTimeout(300);
+    return page.evaluate(
+      (seen) => {
+        const control = window as unknown as { __digestStarted: number; __digestInFlight: number };
+        return control.__digestInFlight === 0 && control.__digestStarted === seen;
+      },
+      before,
+    );
+  };
+  await expect.poll(quiet, { timeout: 60_000 }).toBe(true);
 
   expect(await text(page, '#beacon-log')).not.toContain('Beacon verification');
+  expect(await text(page, '#beacon-log')).toContain('Controls changed');
   expect(await text(page, '#beacon-summary')).toContain('Run a beacon round');
   await expect(page.locator('#beacon-progress')).toHaveAttribute('aria-valuenow', '0');
+  await expect(page.locator('#beacon-run')).toBeEnabled();
 });
 
 // ------------------------------------------------------------------------ page

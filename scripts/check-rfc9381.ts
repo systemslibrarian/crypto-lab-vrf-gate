@@ -91,6 +91,42 @@ async function main(): Promise<void> {
   assert(!nonCanonicalResult.valid, 'vrfVerify accepted a non-canonical s + q response');
   console.log('  ok  vrfVerify rejects a non-canonical s + q response');
 
+  // The s + q case above is rejected by EITHER new check — the response is 33 bytes AND
+  // at least q — so it cannot say which one is doing the work. Measured: with both checks
+  // removed (main's decoder) it is accepted, with either one present it is rejected. The
+  // two cases below isolate the width rule on each field, with the VALUE left canonical:
+  // a leading zero byte is the same integer in a longer encoding, so only the width check
+  // can see it.
+  const paddedResponse = {
+    ...output,
+    proof: { ...output.proof, s: concatBytes(new Uint8Array(1), output.proof.s) },
+  };
+  assert(paddedResponse.proof.s.length === 33, 'Expected a 33-byte zero-padded response');
+  assert(
+    bytesToBigInt(paddedResponse.proof.s) === bytesToBigInt(output.proof.s),
+    'Expected zero padding to leave the response value unchanged',
+  );
+  assert(
+    !(await vrfVerify(publicKeyBytes, alpha, paddedResponse)).valid,
+    'vrfVerify accepted a zero-padded 33-byte response',
+  );
+  console.log('  ok  vrfVerify rejects a zero-padded response of the same value');
+
+  const paddedChallenge = {
+    ...output,
+    proof: { ...output.proof, c: concatBytes(new Uint8Array(1), output.proof.c) },
+  };
+  assert(paddedChallenge.proof.c.length === 17, 'Expected a 17-byte zero-padded challenge');
+  assert(
+    bytesToBigInt(paddedChallenge.proof.c) === bytesToBigInt(output.proof.c),
+    'Expected zero padding to leave the challenge value unchanged',
+  );
+  assert(
+    !(await vrfVerify(publicKeyBytes, alpha, paddedChallenge)).valid,
+    'vrfVerify accepted a zero-padded 17-byte challenge',
+  );
+  console.log('  ok  vrfVerify rejects a zero-padded challenge of the same value');
+
   console.log('rfc-9381 known-answer test passed (ECVRF-P256-SHA256-TAI, Example 10)');
 }
 
