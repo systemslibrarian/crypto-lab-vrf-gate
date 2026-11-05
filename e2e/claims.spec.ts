@@ -78,6 +78,23 @@ async function computeVrf(page: Page, alpha: string): Promise<void> {
   await expect(page.locator('#vrf-compare-result')).toContainText(`α = "${alpha}"`);
 }
 
+/** Make WebCrypto operations observably asynchronous so edit-during-check races are deterministic. */
+async function slowDigests(page: Page): Promise<void> {
+  await page.evaluate(`
+    (() => {
+      const subtle = crypto.subtle;
+      const digest = subtle.digest.bind(subtle);
+      Object.defineProperty(subtle, 'digest', {
+        configurable: true,
+        value: async (...args) => {
+          await new Promise((resolve) => setTimeout(resolve, 25));
+          return digest(...args);
+        },
+      });
+    })()
+  `);
+}
+
 // ------------------------------------------------------------------- VRF: producer
 
 test('the proof, the beta and the "see the math" panel all describe one run', async ({
@@ -357,6 +374,42 @@ test('editing alpha retires the producer readouts it no longer describes', async
   expect(await text(page, '#vrf-compare-result')).toContain('α = "a-completely-different-input"');
 });
 
+test('an in-flight VRF computation cannot repaint results after alpha changes', async ({
+  page,
+  errors,
+}) => {
+  void errors;
+  await open(page);
+  await slowDigests(page);
+
+  await page.locator('#vrf-alpha').fill('alpha-before-the-race');
+  await page.locator('#vrf-compute').click();
+  await page.locator('#vrf-alpha').fill('alpha-after-the-race');
+  await page.waitForTimeout(1_000);
+
+  await expect(page.locator('#vrf-beta')).toHaveText('—');
+  await expect(page.locator('#vrf-proof')).toHaveText('—');
+  expect(await text(page, '#vrf-compare-result')).toContain('α changed');
+});
+
+test('an in-flight VRF verification cannot endorse fields edited during the check', async ({
+  page,
+  errors,
+}) => {
+  void errors;
+  await open(page);
+  await slowDigests(page);
+
+  await page.locator('#vrf-verify').click();
+  const originalBeta = await value(page, '#vrf-verify-beta');
+  const changedFirstByte = originalBeta.startsWith('00') ? '01' : '00';
+  await page.locator('#vrf-verify-beta').fill(`${changedFirstByte}${originalBeta.slice(2)}`);
+  await page.waitForTimeout(1_000);
+
+  await expect(page.locator('#vrf-verify-status')).toHaveAttribute('data-tone', 'neutral');
+  expect(await text(page, '#vrf-verify-status')).not.toContain('VALID');
+});
+
 test('recomputing for a new alpha retires a uniqueness verdict run over the old one', async ({
   page,
   errors,
@@ -540,6 +593,23 @@ test('moving T retires the proof bundle built for the old T', async ({ page, err
   await page.locator('#vdf-verify').click();
   await expect(page.locator('#vdf-verify-status')).toHaveAttribute('data-tone', 'good');
   expect(await text(page, '#vdf-verify-status')).toContain('T = 2^13');
+});
+
+test('changing VDF controls during evaluation cannot publish the retired result', async ({
+  page,
+  errors,
+}) => {
+  void errors;
+  await open(page);
+
+  await page.locator('#vdf-evaluate').click();
+  await page.locator('#vdf-exp').fill('12');
+  await expect(page.locator('#vdf-evaluate')).toBeEnabled({ timeout: 60_000 });
+
+  await expect(page.locator('#vdf-output')).toHaveText('—');
+  await expect(page.locator('#vdf-proof')).toHaveText('—');
+  await expect(page.locator('#vdf-progress')).toHaveAttribute('aria-valuenow', '0');
+  expect(await text(page, '#vdf-verify-status')).toContain('Parameters changed');
 });
 
 test('changing x retires the proof bundle and the g it was derived from', async ({
@@ -736,6 +806,22 @@ test('changing the beacon controls retires the round that was run under the old 
     expect(await text(page, '#beacon-summary')).toContain('Run a beacon round');
     await expect(page.locator('#beacon-progress')).toHaveAttribute('aria-valuenow', '0');
   }
+});
+
+test('changing beacon controls during a round prevents stale completion from repainting', async ({
+  page,
+  errors,
+}) => {
+  void errors;
+  await open(page);
+
+  await page.locator('#beacon-run').click();
+  await page.locator('#beacon-malicious').uncheck();
+  await expect(page.locator('#beacon-run')).toBeEnabled({ timeout: 60_000 });
+
+  expect(await text(page, '#beacon-log')).not.toContain('Beacon verification');
+  expect(await text(page, '#beacon-summary')).toContain('Run a beacon round');
+  await expect(page.locator('#beacon-progress')).toHaveAttribute('aria-valuenow', '0');
 });
 
 // ------------------------------------------------------------------------ page

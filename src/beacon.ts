@@ -158,8 +158,15 @@ export async function verifyBeaconRound(
       failures.push(`${validator.id} commitment does not match its VRF output`);
     }
 
+    if (validator.withheld && validator.revealed) {
+      failures.push(`${validator.id} is marked both withheld and revealed`);
+    }
+
     if (validator.withheld) {
       // Nothing to verify: a withheld proof was never published. Counted, not claimed.
+      vrfProofsSkipped += 1;
+    } else if (!validator.revealed) {
+      failures.push(`${validator.id} did not reveal its VRF proof`);
       vrfProofsSkipped += 1;
     } else {
       const verification = await vrfVerify(validator.keyPair.publicKeyBytes, round.epochSeed, validator.vrfOutput);
@@ -171,16 +178,24 @@ export async function verifyBeaconRound(
     }
   }
 
-  if (round.randaoMix) {
-    const computed = computeRANDAO(round);
-    randaoRecomputed = true;
+  if (!round.randaoMix) {
+    failures.push('RANDAO mix is missing');
+  } else {
+    try {
+      const computed = computeRANDAO(round);
+      randaoRecomputed = true;
 
-    if (!equalBytes(computed, round.randaoMix)) {
-      failures.push('RANDAO mix does not match the revealed VRF outputs');
+      if (!equalBytes(computed, round.randaoMix)) {
+        failures.push('RANDAO mix does not match the revealed VRF outputs');
+      }
+    } catch (error) {
+      failures.push(error instanceof Error ? error.message : 'RANDAO mix could not be recomputed');
     }
   }
 
-  if (round.vdfResult && round.randaoMix) {
+  if (!round.vdfResult) {
+    failures.push('VDF result is missing');
+  } else if (round.randaoMix) {
     const expectedInput = await hashToGroup(round.randaoMix, params.N);
 
     if (expectedInput !== round.vdfResult.input) {
@@ -205,6 +220,8 @@ export async function verifyBeaconRound(
       if (!equalBytes(expectedFinal, round.finalRandomness)) {
         failures.push('Final randomness does not match SHA-256(y)');
       }
+    } else {
+      failures.push('Final randomness is missing');
     }
   }
 

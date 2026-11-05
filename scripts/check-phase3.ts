@@ -20,12 +20,38 @@ async function main(): Promise<void> {
   const params = { ...TOY_PARAMS, T: 1 << 10, T_exp: 10 };
   const honestRound = await initBeaconRound(4, utf8ToBytes('epoch-42'));
   await commitPhase(honestRound);
+  const committedOnlyVerification = await verifyBeaconRound(honestRound, params);
+  assert(!committedOnlyVerification.valid, 'Expected a commit-only round to fail full-round verification');
+  assert(
+    committedOnlyVerification.failures.includes('RANDAO mix is missing') &&
+      committedOnlyVerification.failures.includes('VDF result is missing'),
+    'Expected commit-only verification to name the missing RANDAO and VDF stages',
+  );
+
   await revealPhase(honestRound);
+  const revealedOnlyVerification = await verifyBeaconRound(honestRound, params);
+  assert(!revealedOnlyVerification.valid, 'Expected a reveal-only round to fail full-round verification');
+  assert(
+    revealedOnlyVerification.randaoRecomputed &&
+      revealedOnlyVerification.failures.includes('VDF result is missing'),
+    'Expected reveal-only verification to recompute RANDAO and name the missing VDF stage',
+  );
+
   await applyVDF(honestRound, params);
   const honestVerification = await verifyBeaconRound(honestRound, params);
 
   assert(honestRound.finalRandomness !== undefined, 'Expected honest beacon round to produce final randomness');
   assert(honestVerification.valid, `Expected honest beacon round to verify: ${honestVerification.failures.join('; ')}`);
+
+  const savedFinalRandomness = honestRound.finalRandomness;
+  honestRound.finalRandomness = undefined;
+  const missingFinalVerification = await verifyBeaconRound(honestRound, params);
+  assert(!missingFinalVerification.valid, 'Expected a round without final randomness to fail verification');
+  assert(
+    missingFinalVerification.failures.includes('Final randomness is missing'),
+    'Expected verification to name missing final randomness',
+  );
+  honestRound.finalRandomness = savedFinalRandomness;
 
   const attackRound = await initBeaconRound(4, utf8ToBytes('epoch-42'));
   await commitPhase(attackRound);
