@@ -287,8 +287,9 @@ function renderApp(): void {
           <span class="cl-hero-why-label">WHY IT MATTERS</span>
           <p class="cl-hero-why-text">
             Blockchains pick leaders and lotteries from public randomness, so any predictable or
-            grindable bias is money on the table. VRFs make randomness unforgeable; VDFs delay it past
-            the point where an attacker can preview and rig the outcome.
+            grindable bias is money on the table. VRFs make randomness verifiable and unique to one
+            key; VDFs are meant to delay it past the point where an attacker can preview and rig the
+            outcome.
           </p>
         </aside>
         <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Switch to light mode" aria-pressed="false">🌙</button>
