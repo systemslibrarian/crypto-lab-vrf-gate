@@ -5,6 +5,7 @@ import { spawn } from 'node:child_process';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { chromium } from 'playwright';
 import { AxeBuilder } from '@axe-core/playwright';
+import { auditControlNames, formatControlNameFailures } from './control-names.mjs';
 
 const PORT = 4709;
 const URL = process.env.E2E_URL ?? `http://localhost:${PORT}/crypto-lab-vrf-gate/`;
@@ -46,6 +47,11 @@ async function runAxe(page, label) {
     console.log(`     [${v.impact}] ${v.id}: ${v.help} -> ${nodes}`);
   }
   note(serious.length === 0, `axe (${label}): ${serious.length} serious/critical, ${violations.length} total`);
+  // axe's `label` rule accepts a bare `placeholder` as an accessible name, so a
+  // deleted label can leave this gate green. See `control-names.mjs`.
+  const unnamed = formatControlNameFailures(await auditControlNames(page));
+  unnamed.forEach((u) => console.log(`     ${u}`));
+  note(unnamed.length === 0, `accessible control names (${label}): ${unnamed.length} named only by placeholder/title`);
 }
 
 await startServerIfNeeded();
