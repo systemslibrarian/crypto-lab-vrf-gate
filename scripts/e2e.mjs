@@ -7,7 +7,11 @@ import { chromium } from 'playwright';
 import { AxeBuilder } from '@axe-core/playwright';
 import { auditControlNames, formatControlNameFailures } from './control-names.mjs';
 
-const PORT = 4709;
+// This lab's port in crypto-lab/tools/playwright-ports.json. It read 4709
+// until 2026-11-19, which the registry assigns to crypto-lab-air-stream:
+// this script starts its OWN preview, so it was binding a sibling's port and,
+// if that sibling were already previewing, testing that lab's page instead.
+const PORT = 4331;
 const URL = process.env.E2E_URL ?? `http://localhost:${PORT}/crypto-lab-vrf-gate/`;
 
 let server;
